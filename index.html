@@ -294,49 +294,89 @@
     });
 }
 async function getGoogleDriveDirectUrl(driveUrl) {
-    try {
-        // Check if we're authenticated
-        const token = gapi.client.getToken();
-        if (!token) {
-            await handleAuthClick(); // Wait for authentication
-        }
-        
-        // Extract file ID - support both sharing URL and direct URL formats
-        let fileId;
-        if (driveUrl.includes('drive.google.com')) {
-            const match = driveUrl.match(/[-\w]{25,}/);
-            fileId = match ? match[0] : null;
-        } else if (driveUrl.includes('googleapis.com')) {
-            const match = driveUrl.match(/files\/([-\w]+)/);
-            fileId = match ? match[1] : null;
-        }
+    const maxRetries = 3;
+    let attempt = 0;
 
-        if (!fileId) {
-            throw new Error('Invalid Drive URL format');
+    while (attempt < maxRetries) {
+        try {
+            // Check if we're authenticated
+            const token = gapi.client.getToken();
+            if (!token) {
+                await handleAuthClick();
+            }
+
+            // Extract file ID - support both sharing URL and direct URL formats
+            let fileId;
+            if (driveUrl.includes('drive.google.com')) {
+                const match = driveUrl.match(/[-\w]{25,}/);
+                fileId = match ? match[0] : null;
+            } else if (driveUrl.includes('googleapis.com')) {
+                const match = driveUrl.match(/files\/([-\w]+)/);
+                fileId = match ? match[1] : null;
+            }
+
+            if (!fileId) {
+                throw new Error('Invalid Drive URL format');
+            }
+
+            // Get current access token
+            const currentToken = gapi.client.getToken()?.access_token;
+            if (!currentToken) {
+                throw new Error('No access token available');
+            }
+
+            // First verify file exists without requesting content
+            const checkResponse = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true&fields=id,name,mimeType,size,capabilities`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${currentToken}`
+                    }
+                }
+            );
+
+            if (!checkResponse.ok) {
+                if (checkResponse.status === 404) {
+                    throw new Error('File not found or inaccessible');
+                }
+                throw new Error(`File check failed: ${checkResponse.status}`);
+            }
+
+            const fileInfo = await checkResponse.json();
+            
+            // Verify file is accessible and not too large (100MB limit)
+            if (!fileInfo.capabilities?.canRead) {
+                throw new Error('File is not accessible');
+            }
+            
+            if (fileInfo.size > 100 * 1024 * 1024) {
+                throw new Error('File is too large to stream');
+            }
+
+            return {
+                url: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+                token: currentToken,
+                mimeType: fileInfo.mimeType,
+                size: fileInfo.size
+            };
+
+        } catch (error) {
+            attempt++;
+            console.error(`Attempt ${attempt} failed:`, error);
+
+            if (error.message.includes('File not found') || 
+                error.message.includes('not accessible')) {
+                // Don't retry if file doesn't exist or is inaccessible
+                throw error;
+            }
+
+            if (attempt === maxRetries) {
+                throw error;
+            }
+
+            // Wait before retrying (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
         }
-
-        // Get current access token
-        const currentToken = gapi.client.getToken().access_token;
-        
-        // Verify file exists and get its MIME type
-        const response = await gapi.client.drive.files.get({
-            fileId: fileId,
-            fields: 'id,name,mimeType',
-            supportsAllDrives: true
-        });
-
-        if (!response.result) {
-            throw new Error('File not found');
-        }
-
-        return {
-            url: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
-            token: currentToken,
-            mimeType: response.result.mimeType
-        };
-    } catch (error) {
-        console.error('Error in getGoogleDriveDirectUrl:', error);
-        throw error;
     }
 }
 
@@ -462,82 +502,78 @@ function addVideoToFeed(videoData) {
     videoItem.appendChild(loadingDiv);
 
     // Async function to set up video source
-   const setupVideoSource = async () => {
-        try {
-            const { url, token, mimeType } = await getGoogleDriveDirectUrl(videoData.videoUrl);
-            
-            // Create a proxy URL using Blob
-            const response = await fetch(url, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+ async function setupVideoSource(video, loadingDiv, videoData) {
+    try {
+        const { url, token, mimeType, size } = await getGoogleDriveDirectUrl(videoData.videoUrl);
+        
+        // Use fetch with streaming for larger files
+        const response = await fetch(url, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Range': 'bytes=0-' // Request full file
             }
+        });
 
-            const blob = await response.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            
-            video.src = blobUrl;
-
-            // Clean up the blob URL when the video is done
-            video.onloadeddata = () => {
-                loadingDiv.style.display = 'none';
-            };
-
-            video.onerror = (e) => {
-                console.error('Video error:', e);
-                loadingDiv.innerHTML = 'Error loading video. Please try again.';
-                URL.revokeObjectURL(blobUrl);
-            };
-
-            videoItem.addEventListener('remove', () => {
-                URL.revokeObjectURL(blobUrl);
-            });
-
-        } catch (error) {
-            console.error('Error setting up video:', error);
-            let errorMessage = 'Error loading video. Please try again.';
-            
-            if (error.message?.includes('not found')) {
-                errorMessage = 'Video not available';
-            } else if (error.message?.includes('authenticated')) {
-                errorMessage = 'Please sign in to view videos';
-                
-                const signInButton = document.createElement('button');
-                signInButton.innerHTML = 'Sign In';
-                signInButton.onclick = handleAuthClick;
-                signInButton.style.cssText = `
-                    padding: 8px 16px;
-                    background: #fe2c55;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    margin-top: 10px;
-                    cursor: pointer;
-                `;
-                loadingDiv.appendChild(signInButton);
-            }
-            
-            loadingDiv.innerHTML = errorMessage;
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
-    };
 
-    const info = document.createElement('div');
-    info.className = 'video-info';
-    info.innerHTML = `
-        <div class="video-title">${videoData.title || 'Untitled'}</div>
-        <div class="video-description">${videoData.description || ''}</div>
-    `;
-    
-    videoItem.appendChild(video);
-    videoItem.appendChild(info);
-    videoContainer.appendChild(videoItem);
-    
-    setupVideoSource();
-    observer.observe(videoItem);
+        // Create a blob URL for the video
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        
+        video.src = blobUrl;
+
+        // Set up video event handlers
+        video.onloadeddata = () => {
+            loadingDiv.style.display = 'none';
+            console.log('Video loaded successfully');
+        };
+
+        video.onerror = (e) => {
+            console.error('Video error:', e);
+            loadingDiv.innerHTML = 'Error playing video. Please try again.';
+            URL.revokeObjectURL(blobUrl);
+        };
+
+        // Clean up blob URL when video is removed
+        video.onended = () => {
+            URL.revokeObjectURL(blobUrl);
+        };
+
+    } catch (error) {
+        console.error('Error setting up video:', error);
+        let errorMessage = 'Error loading video. Please try again.';
+        
+        if (error.message.includes('not found') || error.message.includes('inaccessible')) {
+            errorMessage = 'Video is no longer available';
+            // Remove this video from RestDB
+            try {
+                await removeVideoFromDatabase(videoData._id);
+            } catch (dbError) {
+                console.error('Error removing invalid video from database:', dbError);
+            }
+        } else if (error.message.includes('too large')) {
+            errorMessage = 'Video is too large to play';
+        } else if (error.message.includes('authenticated')) {
+            errorMessage = 'Please sign in to view videos';
+            const signInButton = document.createElement('button');
+            signInButton.innerHTML = 'Sign In';
+            signInButton.onclick = handleAuthClick;
+            signInButton.style.cssText = `
+                padding: 8px 16px;
+                background: #fe2c55;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                margin-top: 10px;
+                cursor: pointer;
+            `;
+            loadingDiv.appendChild(signInButton);
+        }
+        
+        loadingDiv.innerHTML = errorMessage;
+    }
 }
 
         async function handleUpload(event) {
@@ -628,7 +664,26 @@ function addVideoToFeed(videoData) {
         }
     });
 }, { threshold: 0.7 });
+async function removeVideoFromDatabase(videoId) {
+    try {
+        const response = await fetch(`${RESTDB_URL}/${videoId}`, {
+            method: 'DELETE',
+            headers: {
+                'x-apikey': RESTDB_API_KEY,
+                'Content-Type': 'application/json'
+            }
+        });
 
+        if (!response.ok) {
+            throw new Error('Failed to delete video from database');
+        }
+
+        console.log('Removed invalid video from database:', videoId);
+    } catch (error) {
+        console.error('Error removing video from database:', error);
+        throw error;
+    }
+}
     </script>
 </body>
 </html>
