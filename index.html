@@ -276,40 +276,52 @@
                 tokenClient.requestAccessToken({prompt: ''});
             }
         }
+function getGoogleDriveDirectUrl(driveUrl) {
+    // Extract the file ID from the Google Drive URL
+    const fileId = driveUrl.match(/[-\w]{25,}/);
+    if (!fileId) return driveUrl;
+    
+    // Construct the direct download URL
+    return `https://www.googleapis.com/drive/v3/files/${fileId[0]}?alt=media&key=${API_KEY}`;
+}
+// Update the uploadToDrive function to handle permissions correctly
+async function uploadToDrive(file, title, description) {
+    const metadata = {
+        name: title,
+        description: description,
+        mimeType: file.type,
+    };
 
-        // Upload video to Google Drive
-        async function uploadToDrive(file, title, description) {
-            const metadata = {
-                name: title,
-                description: description,
+    try {
+        const response = await gapi.client.drive.files.create({
+            resource: metadata,
+            media: {
                 mimeType: file.type,
-            };
+                body: file
+            },
+            fields: 'id'
+        });
 
-            try {
-                const response = await gapi.client.drive.files.create({
-                    resource: metadata,
-                    media: {
-                        mimeType: file.type,
-                        body: file
-                    },
-                    fields: 'id,webContentLink'
-                });
-
-                // Update file permissions to make it accessible via link
-                await gapi.client.drive.permissions.create({
-                    fileId: response.result.id,
-                    resource: {
-                        role: 'reader',
-                        type: 'anyone'
-                    }
-                });
-
-                return response.result;
-            } catch (error) {
-                console.error('Error uploading to Drive:', error);
-                throw error;
+        // Update file permissions to make it accessible
+        await gapi.client.drive.permissions.create({
+            fileId: response.result.id,
+            resource: {
+                role: 'reader',
+                type: 'anyone',
+                allowFileDiscovery: false
             }
-        }
+        });
+
+        // Return the direct download URL format
+        return {
+            id: response.result.id,
+            webContentLink: `https://www.googleapis.com/drive/v3/files/${response.result.id}?alt=media&key=${API_KEY}`
+        };
+    } catch (error) {
+        console.error('Error uploading to Drive:', error);
+        throw error;
+    }
+}
 
         // Save video metadata to RestDB.io
         async function saveToRestDB(title, description, driveLink) {
@@ -361,37 +373,39 @@
         }
 
         // Add video to the feed
-        function addVideoToFeed(videoData) {
+        // Update the addVideoToFeed function
+function addVideoToFeed(videoData) {
     const videoItem = document.createElement('div');
     videoItem.className = 'video-item';
     
     const video = document.createElement('video');
     video.controls = true;
-    video.muted = true; // Add muted attribute
-    video.src = videoData.videoUrl;
+    video.muted = true;
+    video.crossOrigin = 'anonymous'; // Add cross-origin attribute
     
-    // Add unmute button
-    const unmuteButton = document.createElement('button');
-    unmuteButton.innerHTML = '🔇';
-    unmuteButton.className = 'unmute-button';
-    unmuteButton.style.cssText = `
-        position: absolute;
-        bottom: 20px;
-        right: 20px;
-        background: rgba(0, 0, 0, 0.5);
-        border: none;
-        color: white;
-        padding: 8px;
-        border-radius: 50%;
-        cursor: pointer;
-        z-index: 1000;
-    `;
+    // Convert Google Drive URL to direct download URL
+    video.src = getGoogleDriveDirectUrl(videoData.videoUrl);
     
-    // Toggle mute/unmute
-    unmuteButton.addEventListener('click', () => {
-        video.muted = !video.muted;
-        unmuteButton.innerHTML = video.muted ? '🔇' : '🔊';
-    });
+    // Add error handling
+    video.onerror = function(e) {
+        console.error('Video failed to load:', e);
+        // Add a fallback message or retry mechanism
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'video-error';
+        errorDiv.innerHTML = 'Video failed to load. Please try again later.';
+        errorDiv.style.cssText = `
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 1rem;
+            border-radius: 4px;
+            text-align: center;
+        `;
+        videoItem.appendChild(errorDiv);
+    };
     
     const info = document.createElement('div');
     info.className = 'video-info';
@@ -401,7 +415,6 @@
     `;
     
     videoItem.appendChild(video);
-    videoItem.appendChild(unmuteButton);
     videoItem.appendChild(info);
     videoContainer.appendChild(videoItem);
 }
