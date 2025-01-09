@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Short Video Platform</title>
-    <!-- The CSS styles remain the same as before -->
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <!-- Previous CSS styles remain exactly the same -->
     <style>
-        /* Previous CSS styles remain exactly the same */
+        /* All previous CSS styles remain exactly the same */
         * {
             margin: 0;
             padding: 0;
@@ -37,6 +39,7 @@
             width: 100%;
             height: 100vh;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             scroll-snap-align: start;
@@ -46,7 +49,27 @@
         .video-item video {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
+            background: #000;
+        }
+
+        .video-info {
+            position: absolute;
+            bottom: 80px;
+            left: 20px;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            z-index: 100;
+        }
+
+        .video-title {
+            font-size: 1.2em;
+            margin-bottom: 8px;
+        }
+
+        .video-description {
+            font-size: 0.9em;
+            max-width: 300px;
         }
 
         .upload-button {
@@ -64,6 +87,20 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            font-size: 24px;
+        }
+
+        #signin-button {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background-color: #fe2c55;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 1000;
         }
 
         .upload-modal {
@@ -125,19 +162,6 @@
             color: #333;
         }
 
-        #signin-button {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 10px 20px;
-            background-color: #fe2c55;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            z-index: 1000;
-        }
-
         .progress-bar {
             width: 100%;
             height: 20px;
@@ -160,7 +184,7 @@
     <div class="app-container">
         <button id="signin-button" onclick="handleAuthClick()">Sign In</button>
         <div class="video-container" id="videoContainer">
-            <!-- Videos will be added here dynamically -->
+            <!-- Videos will be loaded here -->
         </div>
         
         <button class="upload-button" onclick="openUploadModal()">+</button>
@@ -192,9 +216,11 @@
     </div>
 
     <script>
-        // Google API configuration
+        // Configuration
         const CLIENT_ID = '970895613115-to7bfjm55papkbmo8splc54ufo9nniv7.apps.googleusercontent.com';
         const API_KEY = 'AIzaSyCbvDUWe9eIIcZEE33Rg45B_9-X2lFtjSc';
+        const RESTDB_API_KEY = 'YOUR_RESTDB_API_KEY';
+        const RESTDB_URL = 'https://yourdb-xxxx.restdb.io/rest/videos';
         const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
         const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
@@ -202,54 +228,37 @@
         let gapiInited = false;
         let gisInited = false;
 
+        // Initialize the Google API
         document.addEventListener('DOMContentLoaded', function() {
-            // Load the Google API client library
-            const script1 = document.createElement('script');
-            script1.src = 'https://apis.google.com/js/api.js';
-            script1.onload = gapiLoaded;
-            document.body.appendChild(script1);
-
-            // Load the Google Identity Services library
-            const script2 = document.createElement('script');
-            script2.src = 'https://accounts.google.com/gsi/client';
-            script2.onload = gisLoaded;
-            document.body.appendChild(script2);
+            loadVideos();
+            initializeGoogleAPI();
         });
 
-        // Initialize the Google API
-        function gapiLoaded() {
-            gapi.load('client', initializeGapiClient);
+        function initializeGoogleAPI() {
+            gapi.load('client', async () => {
+                try {
+                    await gapi.client.init({
+                        apiKey: API_KEY,
+                        discoveryDocs: [DISCOVERY_DOC],
+                    });
+                    gapiInited = true;
+                    console.log('GAPI initialized');
+                    
+                    // Initialize Google Identity Services
+                    tokenClient = google.accounts.oauth2.initTokenClient({
+                        client_id: CLIENT_ID,
+                        scope: SCOPES,
+                        callback: '', // Set later
+                    });
+                    gisInited = true;
+                    console.log('GIS initialized');
+                } catch (err) {
+                    console.error('Error initializing Google API:', err);
+                }
+            });
         }
 
-        async function initializeGapiClient() {
-            try {
-                await gapi.client.init({
-                    apiKey: API_KEY,
-                    discoveryDocs: [DISCOVERY_DOC],
-                });
-                gapiInited = true;
-                console.log('GAPI initialized');
-            } catch (err) {
-                console.error('Error initializing GAPI:', err);
-            }
-        }
-
-        function gisLoaded() {
-            try {
-                tokenClient = google.accounts.oauth2.initTokenClient({
-                    client_id: CLIENT_ID,
-                    scope: SCOPES,
-                    callback: '', // defined later
-                });
-                gisInited = true;
-                console.log('GIS initialized');
-            } catch (err) {
-                console.error('Error initializing GIS:', err);
-            }
-        }
-
-        // Rest of the JavaScript code remains exactly the same as before
-        function handleAuthClick() {
+        async function handleAuthClick() {
             tokenClient.callback = async (resp) => {
                 if (resp.error !== undefined) {
                     throw (resp);
@@ -265,11 +274,156 @@
             }
         }
 
-        const videoContainer = document.getElementById('videoContainer');
+        // Upload video to Google Drive
+        async function uploadToDrive(file, title, description) {
+            const metadata = {
+                name: title,
+                description: description,
+                mimeType: file.type,
+            };
+
+            try {
+                const response = await gapi.client.drive.files.create({
+                    resource: metadata,
+                    media: {
+                        mimeType: file.type,
+                        body: file
+                    },
+                    fields: 'id,webContentLink'
+                });
+
+                // Update file permissions to make it accessible via link
+                await gapi.client.drive.permissions.create({
+                    fileId: response.result.id,
+                    resource: {
+                        role: 'reader',
+                        type: 'anyone'
+                    }
+                });
+
+                return response.result;
+            } catch (error) {
+                console.error('Error uploading to Drive:', error);
+                throw error;
+            }
+        }
+
+        // Save video metadata to RestDB.io
+        async function saveToRestDB(title, description, driveLink) {
+            try {
+                const response = await fetch(RESTDB_URL, {
+                    method: 'POST',
+                    headers: {
+                        'x-apikey': RESTDB_API_KEY,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        title: title,
+                        description: description,
+                        videoUrl: driveLink,
+                        timestamp: new Date().toISOString()
+                    })
+                });
+
+                if (!response.ok) throw new Error('Failed to save to RestDB');
+                return await response.json();
+            } catch (error) {
+                console.error('Error saving to RestDB:', error);
+                throw error;
+            }
+        }
+
+        // Load videos from RestDB.io
+        async function loadVideos() {
+            try {
+                const response = await fetch(RESTDB_URL, {
+                    method: 'GET',
+                    headers: {
+                        'x-apikey': RESTDB_API_KEY,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) throw new Error('Failed to fetch videos');
+                
+                const videos = await response.json();
+                const shuffledVideos = videos.sort(() => Math.random() - 0.5);
+                
+                videoContainer.innerHTML = '';
+                
+                shuffledVideos.forEach(addVideoToFeed);
+            } catch (error) {
+                console.error('Error loading videos:', error);
+            }
+        }
+
+        // Add video to the feed
+        function addVideoToFeed(videoData) {
+            const videoItem = document.createElement('div');
+            videoItem.className = 'video-item';
+            
+            const video = document.createElement('video');
+            video.controls = true;
+            video.src = videoData.videoUrl;
+            
+            const info = document.createElement('div');
+            info.className = 'video-info';
+            info.innerHTML = `
+                <div class="video-title">${videoData.title}</div>
+                <div class="video-description">${videoData.description}</div>
+            `;
+            
+            videoItem.appendChild(video);
+            videoItem.appendChild(info);
+            videoContainer.appendChild(videoItem);
+        }
+
+        // Handle video upload
+        async function handleUpload(event) {
+            event.preventDefault();
+            
+            if (!gapi.client.getToken()) {
+                alert('Please sign in first');
+                return;
+            }
+            
+            const videoFile = document.getElementById('videoFile').files[0];
+            const title = document.getElementById('title').value;
+            const description = document.getElementById('description').value;
+            
+            const progressBar = document.getElementById('progressBar');
+            const progress = document.getElementById('progress');
+            progressBar.style.display = 'block';
+            
+            try {
+                // Upload to Google Drive
+                progress.style.width = '50%';
+                const driveResponse = await uploadToDrive(videoFile, title, description);
+                
+                // Save metadata to RestDB.io
+                progress.style.width = '75%';
+                await saveToRestDB(title, description, driveResponse.webContentLink);
+                
+                progress.style.width = '100%';
+                
+                // Reload videos
+                await loadVideos();
+                
+                // Close modal and reset form
+                setTimeout(() => {
+                    closeUploadModal();
+                    progress.style.width = '0%';
+                }, 1000);
+                
+            } catch (error) {
+                console.error('Error in upload process:', error);
+                alert('Error uploading video. Please try again.');
+                progress.style.width = '0%';
+            }
+        }
+
         const uploadModal = document.getElementById('uploadModal');
         const uploadForm = document.getElementById('uploadForm');
-        const progressBar = document.getElementById('progressBar');
-        const progress = document.getElementById('progress');
 
         function openUploadModal() {
             if (!gapi.client.getToken()) {
@@ -282,71 +436,10 @@
         function closeUploadModal() {
             uploadModal.style.display = 'none';
             uploadForm.reset();
+            const progressBar = document.getElementById('progressBar');
+            const progress = document.getElementById('progress');
             progressBar.style.display = 'none';
             progress.style.width = '0%';
-        }
-
-        async function uploadToDrive(file, title, description) {
-            const metadata = {
-                name: title,
-                description: description,
-                mimeType: file.type,
-            };
-
-            const form = new FormData();
-            form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-            form.append('file', file);
-
-            // Get the upload URL
-            const response = await gapi.client.drive.files.create({
-                resource: metadata,
-                media: {
-                    mimeType: file.type,
-                    body: file,
-                },
-                fields: 'id,webViewLink',
-            });
-
-            return response.result;
-        }
-
-        async function handleUpload(event) {
-            event.preventDefault();
-            
-            const videoFile = document.getElementById('videoFile').files[0];
-            const title = document.getElementById('title').value;
-            const description = document.getElementById('description').value;
-
-            progressBar.style.display = 'block';
-
-            try {
-                // Upload to Google Drive
-                progress.style.width = '50%';
-                const driveResponse = await uploadToDrive(videoFile, title, description);
-                progress.style.width = '100%';
-
-                // Create video element and add to feed
-                const videoItem = document.createElement('div');
-                videoItem.className = 'video-item';
-                
-                const video = document.createElement('video');
-                video.controls = true;
-                video.src = URL.createObjectURL(videoFile);
-                
-                videoItem.appendChild(video);
-                videoContainer.insertBefore(videoItem, videoContainer.firstChild);
-
-                console.log('Upload successful. File ID:', driveResponse.id);
-                console.log('File link:', driveResponse.webViewLink);
-
-                // Close modal and reset form
-                setTimeout(closeUploadModal, 1000);
-
-            } catch (error) {
-                console.error('Error uploading file:', error);
-                alert('Error uploading file. Please try again.');
-                progress.style.width = '0%';
-            }
         }
 
         // Auto-play functionality
