@@ -283,24 +283,20 @@
         tokenClient.requestAccessToken({prompt: ''});
     }
 }
-// Update the getGoogleDriveDirectUrl function
 async function getGoogleDriveDirectUrl(driveUrl) {
     const fileId = driveUrl.match(/[-\w]{25,}/);
     if (!fileId) return driveUrl;
     
     try {
-        // First, ensure we have a valid access token
         if (!gapi.client.getToken()) {
             throw new Error('Not authenticated. Please sign in.');
         }
 
-        // Get the access token
         const token = gapi.client.getToken().access_token;
         
         // Create a direct download URL with the access token
         const directUrl = `https://www.googleapis.com/drive/v3/files/${fileId[0]}?alt=media`;
         
-        // Return both the URL and token for authenticated fetching
         return { url: directUrl, token };
     } catch (error) {
         console.error('Error getting direct URL:', error);
@@ -403,9 +399,9 @@ function addVideoToFeed(videoData) {
     const video = document.createElement('video');
     video.controls = true;
     video.muted = true;
-    video.preload = 'metadata';
+    video.preload = 'auto'; // Changed to 'auto' for better streaming
+    video.playsInline = true;
     
-    // Create a loading indicator
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'video-loading';
     loadingDiv.innerHTML = 'Loading video...';
@@ -427,31 +423,76 @@ function addVideoToFeed(videoData) {
         try {
             const { url, token } = await getGoogleDriveDirectUrl(videoData.videoUrl);
             
-            // Fetch with authorization header
-            const response = await fetch(url, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
+            // Instead of creating a blob URL, set the source directly
+            // and handle the requests with a MediaSource
+            const mediaSource = new MediaSource();
+            video.src = URL.createObjectURL(mediaSource);
+            
+            mediaSource.addEventListener('sourceopen', async () => {
+                try {
+                    // Get video metadata first
+                    const headResponse = await fetch(url, {
+                        method: 'HEAD',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    
+                    if (!headResponse.ok) {
+                        throw new Error(`HTTP error! status: ${headResponse.status}`);
+                    }
+                    
+                    const contentType = headResponse.headers.get('content-type') || 'video/mp4';
+                    const sourceBuffer = mediaSource.addSourceBuffer(contentType);
+                    
+                    // Fetch the video data
+                    const response = await fetch(url, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Range': 'bytes=0-' // Request the full file
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const reader = response.body.getReader();
+                    const chunks = [];
+                    
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        chunks.push(value);
+                        
+                        // Wait for sourceBuffer to be ready before appending
+                        if (!sourceBuffer.updating) {
+                            const chunk = new Uint8Array(value);
+                            sourceBuffer.appendBuffer(chunk);
+                        }
+                    }
+                    
+                    // Close the MediaSource when all chunks are loaded
+                    if (!sourceBuffer.updating) {
+                        mediaSource.endOfStream();
+                    }
+                    
+                    loadingDiv.style.display = 'none';
+                } catch (error) {
+                    console.error('Error streaming video:', error);
+                    loadingDiv.innerHTML = 'Error loading video. Please try again.';
                 }
             });
             
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const blob = await response.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            
-            video.src = blobUrl;
-            loadingDiv.style.display = 'none';
-            
-            // Clean up blob URL when video is removed
-            videoItem.addEventListener('remove', () => {
-                URL.revokeObjectURL(blobUrl);
+            mediaSource.addEventListener('error', (e) => {
+                console.error('MediaSource error:', e);
+                loadingDiv.innerHTML = 'Error streaming video. Please try again.';
             });
+            
         } catch (error) {
             console.error('Error setting up video:', error);
             loadingDiv.innerHTML = 'Error loading video. Please sign in and try again.';
-            // If the error is auth-related, show sign-in button
+            
             if (error.message.includes('authenticated')) {
                 const signInButton = document.createElement('button');
                 signInButton.innerHTML = 'Sign In';
@@ -470,7 +511,6 @@ function addVideoToFeed(videoData) {
         }
     };
 
-    // Set up video event handlers
     video.onerror = function(e) {
         console.error('Video failed to load:', e);
         loadingDiv.innerHTML = 'Error loading video. Please try again later.';
@@ -487,13 +527,9 @@ function addVideoToFeed(videoData) {
     videoItem.appendChild(info);
     videoContainer.appendChild(videoItem);
     
-    // Start loading the video
     setupVideoSource();
-    
-    // Add to intersection observer
     observer.observe(videoItem);
 }
-        // Handle video upload
         async function handleUpload(event) {
             event.preventDefault();
             
