@@ -276,13 +276,13 @@
                 tokenClient.requestAccessToken({prompt: ''});
             }
         }
+// Update the getGoogleDriveDirectUrl function
 function getGoogleDriveDirectUrl(driveUrl) {
-    // Extract the file ID from the Google Drive URL
     const fileId = driveUrl.match(/[-\w]{25,}/);
     if (!fileId) return driveUrl;
     
-    // Construct the direct download URL
-    return `https://www.googleapis.com/drive/v3/files/${fileId[0]}?alt=media&key=${API_KEY}`;
+    // Add fields parameter to get additional file metadata
+    return `https://www.googleapis.com/drive/v3/files/${fileId[0]}?alt=media&key=${API_KEY}&supportsAllDrives=true&fields=id,name,size`;
 }
 // Update the uploadToDrive function to handle permissions correctly
 async function uploadToDrive(file, title, description) {
@@ -299,10 +299,10 @@ async function uploadToDrive(file, title, description) {
                 mimeType: file.type,
                 body: file
             },
-            fields: 'id'
+            fields: 'id,size,mimeType'
         });
 
-        // Update file permissions to make it accessible
+        // Update file permissions
         await gapi.client.drive.permissions.create({
             fileId: response.result.id,
             resource: {
@@ -312,17 +312,18 @@ async function uploadToDrive(file, title, description) {
             }
         });
 
-        // Return the direct download URL format
+        // Return with additional metadata
         return {
             id: response.result.id,
-            webContentLink: `https://www.googleapis.com/drive/v3/files/${response.result.id}?alt=media&key=${API_KEY}`
+            webContentLink: `https://www.googleapis.com/drive/v3/files/${response.result.id}?alt=media&key=${API_KEY}&supportsAllDrives=true`,
+            size: response.result.size,
+            mimeType: response.result.mimeType
         };
     } catch (error) {
         console.error('Error uploading to Drive:', error);
         throw error;
     }
 }
-
         // Save video metadata to RestDB.io
         async function saveToRestDB(title, description, driveLink) {
             try {
@@ -372,24 +373,25 @@ async function uploadToDrive(file, title, description) {
             }
         }
 
-        // Add video to the feed
-        // Update the addVideoToFeed function
 function addVideoToFeed(videoData) {
     const videoItem = document.createElement('div');
     videoItem.className = 'video-item';
     
+    // Create video source element instead of setting src directly
     const video = document.createElement('video');
     video.controls = true;
     video.muted = true;
-    video.crossOrigin = 'anonymous'; // Add cross-origin attribute
+    video.crossOrigin = 'anonymous';
+    video.preload = 'metadata'; // Only load metadata initially
     
-    // Convert Google Drive URL to direct download URL
-    video.src = getGoogleDriveDirectUrl(videoData.videoUrl);
+    // Create source element
+    const source = document.createElement('source');
+    source.src = getGoogleDriveDirectUrl(videoData.videoUrl);
+    source.type = 'video/mp4'; // Adjust type if needed
     
     // Add error handling
     video.onerror = function(e) {
         console.error('Video failed to load:', e);
-        // Add a fallback message or retry mechanism
         const errorDiv = document.createElement('div');
         errorDiv.className = 'video-error';
         errorDiv.innerHTML = 'Video failed to load. Please try again later.';
@@ -407,6 +409,14 @@ function addVideoToFeed(videoData) {
         videoItem.appendChild(errorDiv);
     };
     
+    // Add event listener for when metadata is loaded
+    video.addEventListener('loadedmetadata', function() {
+        console.log('Video metadata loaded');
+    });
+    
+    // Add the source to video
+    video.appendChild(source);
+    
     const info = document.createElement('div');
     info.className = 'video-info';
     info.innerHTML = `
@@ -417,6 +427,9 @@ function addVideoToFeed(videoData) {
     videoItem.appendChild(video);
     videoItem.appendChild(info);
     videoContainer.appendChild(videoItem);
+    
+    // Initialize the video after adding to DOM
+    video.load();
 }
         // Handle video upload
         async function handleUpload(event) {
