@@ -8,6 +8,9 @@
     <script src="https://accounts.google.com/gsi/client"></script>
     <!-- Previous CSS styles remain exactly the same -->
     <style>
+        .unmute-button:hover {
+    background: rgba(0, 0, 0, 0.7);
+}
         /* All previous CSS styles remain exactly the same */
         * {
             margin: 0;
@@ -359,25 +362,49 @@
 
         // Add video to the feed
         function addVideoToFeed(videoData) {
-            const videoItem = document.createElement('div');
-            videoItem.className = 'video-item';
-            
-            const video = document.createElement('video');
-            video.controls = true;
-            video.src = videoData.videoUrl;
-            
-            const info = document.createElement('div');
-            info.className = 'video-info';
-            info.innerHTML = `
-                <div class="video-title">${videoData.title}</div>
-                <div class="video-description">${videoData.description}</div>
-            `;
-            
-            videoItem.appendChild(video);
-            videoItem.appendChild(info);
-            videoContainer.appendChild(videoItem);
-        }
-
+    const videoItem = document.createElement('div');
+    videoItem.className = 'video-item';
+    
+    const video = document.createElement('video');
+    video.controls = true;
+    video.muted = true; // Add muted attribute
+    video.src = videoData.videoUrl;
+    
+    // Add unmute button
+    const unmuteButton = document.createElement('button');
+    unmuteButton.innerHTML = '🔇';
+    unmuteButton.className = 'unmute-button';
+    unmuteButton.style.cssText = `
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.5);
+        border: none;
+        color: white;
+        padding: 8px;
+        border-radius: 50%;
+        cursor: pointer;
+        z-index: 1000;
+    `;
+    
+    // Toggle mute/unmute
+    unmuteButton.addEventListener('click', () => {
+        video.muted = !video.muted;
+        unmuteButton.innerHTML = video.muted ? '🔇' : '🔊';
+    });
+    
+    const info = document.createElement('div');
+    info.className = 'video-info';
+    info.innerHTML = `
+        <div class="video-title">${videoData.title}</div>
+        <div class="video-description">${videoData.description}</div>
+    `;
+    
+    videoItem.appendChild(video);
+    videoItem.appendChild(unmuteButton);
+    videoItem.appendChild(info);
+    videoContainer.appendChild(videoItem);
+}
         // Handle video upload
         async function handleUpload(event) {
             event.preventDefault();
@@ -444,26 +471,30 @@
 
         // Auto-play functionality
         const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    const video = entry.target.querySelector('video');
-                    video.play();
-                } else {
-                    const video = entry.target.querySelector('video');
-                    video.pause();
+    entries.forEach(entry => {
+        const video = entry.target.querySelector('video');
+        if (entry.isIntersecting) {
+            // Only try to play if the video is not already playing
+            if (video && video.paused) {
+                // Add muted attribute to allow autoplay
+                video.muted = true;
+                // Handle play() promise
+                const playPromise = video.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch((error) => {
+                        console.log("Autoplay was prevented:", error);
+                    });
                 }
-            });
-        }, { threshold: 0.7 });
+            }
+        } else {
+            // Pause video when not in view
+            if (video && !video.paused) {
+                video.pause();
+            }
+        }
+    });
+}, { threshold: 0.7 });
 
-        const observeVideos = () => {
-            document.querySelectorAll('.video-item').forEach(item => {
-                observer.observe(item);
-            });
-        };
-
-        new MutationObserver(observeVideos).observe(videoContainer, {
-            childList: true
-        });
     </script>
 </body>
 </html>
