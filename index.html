@@ -285,7 +285,9 @@
 }
 async function getGoogleDriveDirectUrl(driveUrl) {
     const fileId = driveUrl.match(/[-\w]{25,}/);
-    if (!fileId) return driveUrl;
+    if (!fileId) {
+        throw new Error('Invalid Drive URL format');
+    }
     
     try {
         if (!gapi.client.getToken()) {
@@ -294,9 +296,17 @@ async function getGoogleDriveDirectUrl(driveUrl) {
 
         const token = gapi.client.getToken().access_token;
         
-        // Create a direct download URL with the access token
+        // Verify file exists and is accessible
+        const response = await gapi.client.drive.files.get({
+            fileId: fileId[0],
+            fields: 'id,name,mimeType'
+        });
+
+        if (!response.result) {
+            throw new Error('File not found');
+        }
+
         const directUrl = `https://www.googleapis.com/drive/v3/files/${fileId[0]}?alt=media`;
-        
         return { url: directUrl, token };
     } catch (error) {
         console.error('Error getting direct URL:', error);
@@ -399,7 +409,6 @@ function addVideoToFeed(videoData) {
     const video = document.createElement('video');
     video.controls = true;
     video.muted = true;
-    video.preload = 'auto'; // Changed to 'auto' for better streaming
     video.playsInline = true;
     
     const loadingDiv = document.createElement('div');
@@ -417,81 +426,59 @@ function addVideoToFeed(videoData) {
     `;
     videoItem.appendChild(loadingDiv);
 
-
     // Async function to set up video source
     const setupVideoSource = async () => {
         try {
             const { url, token } = await getGoogleDriveDirectUrl(videoData.videoUrl);
             
-            // Instead of creating a blob URL, set the source directly
-            // and handle the requests with a MediaSource
-            const mediaSource = new MediaSource();
-            video.src = URL.createObjectURL(mediaSource);
-            
-            mediaSource.addEventListener('sourceopen', async () => {
-                try {
-                    // Get video metadata first
-                    const headResponse = await fetch(url, {
-                        method: 'HEAD',
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        }
-                    });
-                    
-                    if (!headResponse.ok) {
-                        throw new Error(`HTTP error! status: ${headResponse.status}`);
-                    }
-                    
-                    const contentType = headResponse.headers.get('content-type') || 'video/mp4';
-                    const sourceBuffer = mediaSource.addSourceBuffer(contentType);
-                    
-                    // Fetch the video data
-                    const response = await fetch(url, {
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Range': 'bytes=0-' // Request the full file
-                        }
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    
-                    const reader = response.body.getReader();
-                    const chunks = [];
-                    
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        chunks.push(value);
-                        
-                        // Wait for sourceBuffer to be ready before appending
-                        if (!sourceBuffer.updating) {
-                            const chunk = new Uint8Array(value);
-                            sourceBuffer.appendBuffer(chunk);
-                        }
-                    }
-                    
-                    // Close the MediaSource when all chunks are loaded
-                    if (!sourceBuffer.updating) {
-                        mediaSource.endOfStream();
-                    }
-                    
-                    loadingDiv.style.display = 'none';
-                } catch (error) {
-                    console.error('Error streaming video:', error);
-                    loadingDiv.innerHTML = 'Error loading video. Please try again.';
+            // First, check if the file exists and get its metadata
+            const metadataResponse = await fetch(url, {
+                method: 'HEAD',
+                headers: {
+                    'Authorization': `Bearer ${token}`
                 }
             });
             
-            mediaSource.addEventListener('error', (e) => {
-                console.error('MediaSource error:', e);
-                loadingDiv.innerHTML = 'Error streaming video. Please try again.';
+            if (!metadataResponse.ok) {
+                throw new Error(`Video not found or inaccessible: ${metadataResponse.status}`);
+            }
+
+            // Set video source directly with proper headers
+            video.src = url;
+            const originalFetch = window.fetch;
+            window.fetch = async (...args) => {
+                if (args[0] === url) {
+                    const options = args[1] || {};
+                    options.headers = {
+                        ...options.headers,
+                        'Authorization': `Bearer ${token}`,
+                        'Range': options.headers?.['Range'] || 'bytes=0-'
+                    };
+                    args[1] = options;
+                }
+                return originalFetch(...args);
+            };
+
+            // Handle video loading states
+            video.addEventListener('loadeddata', () => {
+                loadingDiv.style.display = 'none';
             });
-            
+
+            video.addEventListener('error', (e) => {
+                console.error('Video error:', e);
+                loadingDiv.innerHTML = 'Error loading video. Please try again.';
+            });
+
+            // Clean up fetch override when video is removed
+            videoItem.addEventListener('remove', () => {
+                window.fetch = originalFetch;
+            });
+
         } catch (error) {
             console.error('Error setting up video:', error);
-            loadingDiv.innerHTML = 'Error loading video. Please sign in and try again.';
+            loadingDiv.innerHTML = error.message.includes('not found') ? 
+                'Video not available' : 
+                'Error loading video. Please sign in and try again.';
             
             if (error.message.includes('authenticated')) {
                 const signInButton = document.createElement('button');
@@ -511,11 +498,6 @@ function addVideoToFeed(videoData) {
         }
     };
 
-    video.onerror = function(e) {
-        console.error('Video failed to load:', e);
-        loadingDiv.innerHTML = 'Error loading video. Please try again later.';
-    };
-
     const info = document.createElement('div');
     info.className = 'video-info';
     info.innerHTML = `
@@ -530,6 +512,7 @@ function addVideoToFeed(videoData) {
     setupVideoSource();
     observer.observe(videoItem);
 }
+
         async function handleUpload(event) {
             event.preventDefault();
             
