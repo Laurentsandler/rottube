@@ -300,13 +300,13 @@ async function getGoogleDriveDirectUrl(driveUrl) {
 
     while (attempt < maxRetries) {
         try {
-            // Check if we're authenticated
+            // Ensure the user is authenticated
             const token = gapi.client.getToken();
             if (!token) {
                 await handleAuthClick();
             }
 
-            // Extract file ID
+            // Extract the file ID from the URL
             let fileId;
             if (driveUrl.includes('drive.google.com')) {
                 const match = driveUrl.match(/[-\w]{25,}/);
@@ -320,41 +320,28 @@ async function getGoogleDriveDirectUrl(driveUrl) {
                 throw new Error('Invalid Drive URL format');
             }
 
-            // Get current access token
             const currentToken = gapi.client.getToken()?.access_token;
             if (!currentToken) {
                 throw new Error('No access token available');
             }
 
+            // Ensure file permissions allow public access
             try {
-                // Try to get the file metadata first
-                const metadataResponse = await gapi.client.drive.files.get({
-                    fileId: fileId,
-                    fields: 'id,name,mimeType,size,capabilities'
-                });
-
-                const fileInfo = metadataResponse.result;
-
-                // If we can get metadata, update permissions to make sure it's accessible
                 await gapi.client.drive.permissions.create({
                     fileId: fileId,
                     resource: {
                         role: 'reader',
                         type: 'anyone',
-                        allowFileDiscovery: false
-                    }
+                        allowFileDiscovery: false,
+                    },
                 });
-
-                return {
-                    url: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
-                    token: currentToken,
-                    mimeType: fileInfo.mimeType,
-                    size: fileInfo.size
-                };
-            } catch (error) {
-                console.error('Error accessing file:', error);
-                throw new Error('File is not accessible');
+            } catch (permissionError) {
+                console.error('Failed to set file permissions:', permissionError);
             }
+
+            // Construct the direct download URL
+            const fileUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+            return { url: fileUrl, token: currentToken };
 
         } catch (error) {
             attempt++;
@@ -364,6 +351,7 @@ async function getGoogleDriveDirectUrl(driveUrl) {
                 throw error;
             }
 
+            // Exponential backoff before retrying
             await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
         }
     }
@@ -377,54 +365,52 @@ async function uploadToDrive(file, title, description) {
     };
 
     try {
-        // Create a multipart request for both metadata and media
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
         form.append('file', file);
 
-        // Get the access token
-        const token = gapi.client.getToken().access_token;
+        const token = gapi.client.getToken()?.access_token;
 
-        // Upload the file
+        if (!token) {
+            await handleAuthClick();
+        }
+
         const uploadResponse = await fetch(
-            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,size,mimeType',
+            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
             {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${token}`
+                    'Authorization': `Bearer ${token}`,
                 },
-                body: form
+                body: form,
             }
         );
 
         if (!uploadResponse.ok) {
-            throw new Error('Failed to upload file');
+            throw new Error('File upload failed');
         }
 
         const result = await uploadResponse.json();
+        const fileId = result.id;
 
-        // Set public permission
+        // Set public permissions
         await gapi.client.drive.permissions.create({
-            fileId: result.id,
+            fileId: fileId,
             resource: {
                 role: 'reader',
                 type: 'anyone',
-                allowFileDiscovery: false
+                allowFileDiscovery: false,
             },
-            fields: 'id'
         });
 
-        return {
-            id: result.id,
-            webContentLink: `https://www.googleapis.com/drive/v3/files/${result.id}?alt=media&key=${API_KEY}&supportsAllDrives=true`,
-            size: result.size,
-            mimeType: result.mimeType
-        };
+        console.log('File uploaded successfully. File ID:', fileId);
+        return fileId;
     } catch (error) {
-        console.error('Error uploading to Drive:', error);
+        console.error('Error during upload:', error);
         throw error;
     }
 }
+
 async function saveToRestDB(title, description, driveLink) {
     try {
         const response = await fetch(RESTDB_URL, {
