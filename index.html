@@ -267,52 +267,79 @@
         return;
     }
 
-    tokenClient.callback = async (resp) => {
-        if (resp.error !== undefined) {
-            throw resp;
-        }
-        document.getElementById('signin-button').innerText = 'Signed In';
-        document.getElementById('signin-button').disabled = true;
-        // Reload videos after successful authentication
-        await loadVideos();
-    };
+    return new Promise((resolve, reject) => {
+        try {
+            tokenClient.callback = async (resp) => {
+                if (resp.error !== undefined) {
+                    reject(resp);
+                    return;
+                }
+                
+                const button = document.getElementById('signin-button');
+                button.innerText = 'Signed In';
+                button.disabled = true;
+                
+                await loadVideos();
+                resolve(resp);
+            };
 
-    if (gapi.client.getToken() === null) {
-        tokenClient.requestAccessToken({prompt: 'consent'});
-    } else {
-        tokenClient.requestAccessToken({prompt: ''});
-    }
+            if (gapi.client.getToken() === null) {
+                tokenClient.requestAccessToken({ prompt: 'consent' });
+            } else {
+                tokenClient.requestAccessToken({ prompt: '' });
+            }
+        } catch (err) {
+            reject(err);
+        }
+    });
 }
 async function getGoogleDriveDirectUrl(driveUrl) {
-    const fileId = driveUrl.match(/[-\w]{25,}/);
-    if (!fileId) {
-        throw new Error('Invalid Drive URL format');
-    }
-    
     try {
-        if (!gapi.client.getToken()) {
-            throw new Error('Not authenticated. Please sign in.');
+        // Check if we're authenticated
+        const token = gapi.client.getToken();
+        if (!token) {
+            await handleAuthClick(); // Wait for authentication
+        }
+        
+        // Extract file ID - support both sharing URL and direct URL formats
+        let fileId;
+        if (driveUrl.includes('drive.google.com')) {
+            const match = driveUrl.match(/[-\w]{25,}/);
+            fileId = match ? match[0] : null;
+        } else if (driveUrl.includes('googleapis.com')) {
+            const match = driveUrl.match(/files\/([-\w]+)/);
+            fileId = match ? match[1] : null;
         }
 
-        const token = gapi.client.getToken().access_token;
+        if (!fileId) {
+            throw new Error('Invalid Drive URL format');
+        }
+
+        // Get current access token
+        const currentToken = gapi.client.getToken().access_token;
         
-        // Verify file exists and is accessible
+        // Verify file exists and get its MIME type
         const response = await gapi.client.drive.files.get({
-            fileId: fileId[0],
-            fields: 'id,name,mimeType'
+            fileId: fileId,
+            fields: 'id,name,mimeType',
+            supportsAllDrives: true
         });
 
         if (!response.result) {
             throw new Error('File not found');
         }
 
-        const directUrl = `https://www.googleapis.com/drive/v3/files/${fileId[0]}?alt=media`;
-        return { url: directUrl, token };
+        return {
+            url: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+            token: currentToken,
+            mimeType: response.result.mimeType
+        };
     } catch (error) {
-        console.error('Error getting direct URL:', error);
+        console.error('Error in getGoogleDriveDirectUrl:', error);
         throw error;
     }
 }
+
 // Update the uploadToDrive function to handle permissions correctly
 async function uploadToDrive(file, title, description) {
     const metadata = {
@@ -379,29 +406,37 @@ async function uploadToDrive(file, title, description) {
         }
 
         // Load videos from RestDB.io
-        async function loadVideos() {
-            try {
-                const response = await fetch(RESTDB_URL, {
-                    method: 'GET',
-                    headers: {
-                        'x-apikey': RESTDB_API_KEY,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                if (!response.ok) throw new Error('Failed to fetch videos');
-                
-                const videos = await response.json();
-                const shuffledVideos = videos.sort(() => Math.random() - 0.5);
-                
-                videoContainer.innerHTML = '';
-                
-                shuffledVideos.forEach(addVideoToFeed);
-            } catch (error) {
-                console.error('Error loading videos:', error);
+       async function loadVideos() {
+    try {
+        const response = await fetch(RESTDB_URL, {
+            method: 'GET',
+            headers: {
+                'x-apikey': RESTDB_API_KEY,
+                'Content-Type': 'application/json'
             }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch videos');
+        }
+        
+        const videos = await response.json();
+        if (!Array.isArray(videos) || videos.length === 0) {
+            console.log('No videos found in database');
+            return;
         }
 
+        const shuffledVideos = videos.sort(() => Math.random() - 0.5);
+        const videoContainer = document.getElementById('videoContainer');
+        videoContainer.innerHTML = '';
+        
+        shuffledVideos.forEach(addVideoToFeed);
+    } catch (error) {
+        console.error('Error loading videos:', error);
+        const videoContainer = document.getElementById('videoContainer');
+        videoContainer.innerHTML = '<div class="error-message">Error loading videos. Please try again later.</div>';
+    }
+}
 function addVideoToFeed(videoData) {
     const videoItem = document.createElement('div');
     videoItem.className = 'video-item';
@@ -427,60 +462,50 @@ function addVideoToFeed(videoData) {
     videoItem.appendChild(loadingDiv);
 
     // Async function to set up video source
-    const setupVideoSource = async () => {
+   const setupVideoSource = async () => {
         try {
-            const { url, token } = await getGoogleDriveDirectUrl(videoData.videoUrl);
+            const { url, token, mimeType } = await getGoogleDriveDirectUrl(videoData.videoUrl);
             
-            // First, check if the file exists and get its metadata
-            const metadataResponse = await fetch(url, {
-                method: 'HEAD',
+            // Create a proxy URL using Blob
+            const response = await fetch(url, {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
             });
-            
-            if (!metadataResponse.ok) {
-                throw new Error(`Video not found or inaccessible: ${metadataResponse.status}`);
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            // Set video source directly with proper headers
-            video.src = url;
-            const originalFetch = window.fetch;
-            window.fetch = async (...args) => {
-                if (args[0] === url) {
-                    const options = args[1] || {};
-                    options.headers = {
-                        ...options.headers,
-                        'Authorization': `Bearer ${token}`,
-                        'Range': options.headers?.['Range'] || 'bytes=0-'
-                    };
-                    args[1] = options;
-                }
-                return originalFetch(...args);
+            const blob = await response.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            
+            video.src = blobUrl;
+
+            // Clean up the blob URL when the video is done
+            video.onloadeddata = () => {
+                loadingDiv.style.display = 'none';
             };
 
-            // Handle video loading states
-            video.addEventListener('loadeddata', () => {
-                loadingDiv.style.display = 'none';
-            });
-
-            video.addEventListener('error', (e) => {
+            video.onerror = (e) => {
                 console.error('Video error:', e);
                 loadingDiv.innerHTML = 'Error loading video. Please try again.';
-            });
+                URL.revokeObjectURL(blobUrl);
+            };
 
-            // Clean up fetch override when video is removed
             videoItem.addEventListener('remove', () => {
-                window.fetch = originalFetch;
+                URL.revokeObjectURL(blobUrl);
             });
 
         } catch (error) {
             console.error('Error setting up video:', error);
-            loadingDiv.innerHTML = error.message.includes('not found') ? 
-                'Video not available' : 
-                'Error loading video. Please sign in and try again.';
+            let errorMessage = 'Error loading video. Please try again.';
             
-            if (error.message.includes('authenticated')) {
+            if (error.message?.includes('not found')) {
+                errorMessage = 'Video not available';
+            } else if (error.message?.includes('authenticated')) {
+                errorMessage = 'Please sign in to view videos';
+                
                 const signInButton = document.createElement('button');
                 signInButton.innerHTML = 'Sign In';
                 signInButton.onclick = handleAuthClick;
@@ -495,14 +520,16 @@ function addVideoToFeed(videoData) {
                 `;
                 loadingDiv.appendChild(signInButton);
             }
+            
+            loadingDiv.innerHTML = errorMessage;
         }
     };
 
     const info = document.createElement('div');
     info.className = 'video-info';
     info.innerHTML = `
-        <div class="video-title">${videoData.title}</div>
-        <div class="video-description">${videoData.description}</div>
+        <div class="video-title">${videoData.title || 'Untitled'}</div>
+        <div class="video-description">${videoData.description || ''}</div>
     `;
     
     videoItem.appendChild(video);
