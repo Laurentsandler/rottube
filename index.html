@@ -226,7 +226,7 @@
         const RESTDB_URL = 'https://rottube-48ac.restdb.io/rest/videos';
         const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
         const SCOPES = 'https://www.googleapis.com/auth/drive.file';
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzZgFvDteOFbzIab9BqRXOcrQr-IYN-OnmRPpHD7N2HLNPJ8hBH0T_VzMY4mFUOuTTw/exec';
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw1F10_hF0oAPVt1scOCfeGKGZSN2q3OhBKW4UizY8I1TsLLawIca3l2fncCjOKay_j/exec';
         
         let tokenClient;
 let gapiInited = false;
@@ -438,7 +438,14 @@ async function saveToRestDB(title, description, driveLink) {
 
 async function loadVideos() {
     try {
-        const response = await fetch(`${APPS_SCRIPT_URL}?action=getVideos`);
+        const response = await fetch(`${APPS_SCRIPT_URL}?action=getVideos`, {
+            method: 'GET',
+            mode: 'cors',
+            headers: {
+                'Accept': 'application/json'
+            }
+        });
+        
         if (!response.ok) throw new Error('Failed to fetch videos');
         
         const result = await response.json();
@@ -457,7 +464,7 @@ async function loadVideos() {
             addVideoToFeed({
                 title: video.name,
                 description: video.description || '',
-                videoUrl: video.id // We'll use the file ID instead of direct URL
+                videoUrl: video.id
             });
         });
     } catch (error) {
@@ -466,7 +473,6 @@ async function loadVideos() {
         videoContainer.innerHTML = '<div class="error-message">Error loading videos. Please try again later.</div>';
     }
 }
-
 async function removeVideoFromDatabase(videoId) {
     try {
         const response = await fetch(`${RESTDB_URL}/${videoId}`, {
@@ -490,7 +496,14 @@ async function removeVideoFromDatabase(videoId) {
 
 async function setupVideoSource(video, loadingDiv, videoData) {
     try {
-        const response = await fetch(`${APPS_SCRIPT_URL}?action=getVideo&fileId=${videoData.videoUrl}`);
+        const response = await fetch(`${APPS_SCRIPT_URL}?action=getVideo&fileId=${videoData.videoUrl}`, {
+            method: 'GET',
+            mode: 'cors',
+            headers: {
+                'Accept': 'application/json'
+            }
+        });
+        
         if (!response.ok) throw new Error('Failed to get video URL');
         
         const result = await response.json();
@@ -512,7 +525,6 @@ async function setupVideoSource(video, loadingDiv, videoData) {
         loadingDiv.innerHTML = 'Error loading video. Please try again.';
     }
 }
-
 function addVideoToFeed(videoData) {
     const videoItem = document.createElement('div');
     videoItem.className = 'video-item';
@@ -554,6 +566,7 @@ function addVideoToFeed(videoData) {
     observer.observe(videoItem);
 }
 
+
 async function handleUpload(event) {
     event.preventDefault();
     
@@ -566,7 +579,6 @@ async function handleUpload(event) {
     progressBar.style.display = 'block';
     
     try {
-        // Convert file to base64
         const reader = new FileReader();
         reader.readAsDataURL(videoFile);
         
@@ -577,6 +589,11 @@ async function handleUpload(event) {
             
             const response = await fetch(`${APPS_SCRIPT_URL}?action=upload`, {
                 method: 'POST',
+                mode: 'cors',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
                 body: JSON.stringify({
                     filename: title,
                     description: description,
