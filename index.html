@@ -575,7 +575,26 @@ function addVideoToFeed(videoData) {
         loadingDiv.innerHTML = errorMessage;
     }
 }
+async function removeVideoFromDatabase(videoId) {
+    try {
+        const response = await fetch(`${RESTDB_URL}/${videoId}`, {
+            method: 'DELETE',
+            headers: {
+                'x-apikey': RESTDB_API_KEY,
+                'Content-Type': 'application/json'
+            }
+        });
 
+        if (!response.ok) {
+            throw new Error('Failed to delete video from database');
+        }
+
+        console.log('Removed invalid video from database:', videoId);
+    } catch (error) {
+        console.error('Error removing video from database:', error);
+        throw error;
+    }
+}
         async function handleUpload(event) {
             event.preventDefault();
             
@@ -664,26 +683,7 @@ function addVideoToFeed(videoData) {
         }
     });
 }, { threshold: 0.7 });
-async function removeVideoFromDatabase(videoId) {
-    try {
-        const response = await fetch(`${RESTDB_URL}/${videoId}`, {
-            method: 'DELETE',
-            headers: {
-                'x-apikey': RESTDB_API_KEY,
-                'Content-Type': 'application/json'
-            }
-        });
 
-        if (!response.ok) {
-            throw new Error('Failed to delete video from database');
-        }
-
-        console.log('Removed invalid video from database:', videoId);
-    } catch (error) {
-        console.error('Error removing video from database:', error);
-        throw error;
-    }
-}
     </script>
 </body>
 </html>
