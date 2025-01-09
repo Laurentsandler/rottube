@@ -226,7 +226,8 @@
         const RESTDB_URL = 'https://rottube-48ac.restdb.io/rest/videos';
         const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
         const SCOPES = 'https://www.googleapis.com/auth/drive.file';
-
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyw45ku4tM3UFqABHx29cByFPk8RiUtV5tyNvNSz1NNWRduUAY2mAMEUL6I6yM9e95y/exec';
+        
         let tokenClient;
 let gapiInited = false;
 let gisInited = false;
@@ -437,40 +438,35 @@ async function saveToRestDB(title, description, driveLink) {
 
 async function loadVideos() {
     try {
-        // Ensure we're authenticated first
-        if (!gapi.client.getToken()) {
-            await handleAuthClick();
-        }
-
-        const response = await fetch(RESTDB_URL, {
-            method: 'GET',
-            headers: {
-                'x-apikey': RESTDB_API_KEY,
-                'Content-Type': 'application/json'
-            }
-        });
+        const response = await fetch(`${APPS_SCRIPT_URL}?action=getVideos`);
+        if (!response.ok) throw new Error('Failed to fetch videos');
         
-        if (!response.ok) {
-            throw new Error('Failed to fetch videos');
-        }
+        const result = await response.json();
+        if (result.status !== 'success') throw new Error(result.message);
         
-        const videos = await response.json();
+        const videos = result.data;
         if (!Array.isArray(videos) || videos.length === 0) {
-            console.log('No videos found in database');
+            console.log('No videos found');
             return;
         }
 
-        const shuffledVideos = videos.sort(() => Math.random() - 0.5);
         const videoContainer = document.getElementById('videoContainer');
         videoContainer.innerHTML = '';
         
-        shuffledVideos.forEach(addVideoToFeed);
+        videos.forEach(video => {
+            addVideoToFeed({
+                title: video.name,
+                description: video.description || '',
+                videoUrl: video.id // We'll use the file ID instead of direct URL
+            });
+        });
     } catch (error) {
         console.error('Error loading videos:', error);
         const videoContainer = document.getElementById('videoContainer');
         videoContainer.innerHTML = '<div class="error-message">Error loading videos. Please try again later.</div>';
     }
 }
+
 async function removeVideoFromDatabase(videoId) {
     try {
         const response = await fetch(`${RESTDB_URL}/${videoId}`, {
@@ -494,24 +490,14 @@ async function removeVideoFromDatabase(videoId) {
 
 async function setupVideoSource(video, loadingDiv, videoData) {
     try {
-        const { url, token, mimeType, size } = await getGoogleDriveDirectUrl(videoData.videoUrl);
+        const response = await fetch(`${APPS_SCRIPT_URL}?action=getVideo&fileId=${videoData.videoUrl}`);
+        if (!response.ok) throw new Error('Failed to get video URL');
         
-        const response = await fetch(url, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Range': 'bytes=0-'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
+        const result = await response.json();
+        if (result.status !== 'success') throw new Error(result.message);
         
-        video.src = blobUrl;
-
+        video.src = result.url;
+        
         video.onloadeddata = () => {
             loadingDiv.style.display = 'none';
             console.log('Video loaded successfully');
@@ -520,44 +506,10 @@ async function setupVideoSource(video, loadingDiv, videoData) {
         video.onerror = (e) => {
             console.error('Video error:', e);
             loadingDiv.innerHTML = 'Error playing video. Please try again.';
-            URL.revokeObjectURL(blobUrl);
         };
-
-        video.onended = () => {
-            URL.revokeObjectURL(blobUrl);
-        };
-
     } catch (error) {
         console.error('Error setting up video:', error);
-        let errorMessage = 'Error loading video. Please try again.';
-        
-        if (error.message.includes('not found') || error.message.includes('inaccessible')) {
-            errorMessage = 'Video is no longer available';
-            try {
-                await removeVideoFromDatabase(videoData._id);
-            } catch (dbError) {
-                console.error('Error removing invalid video from database:', dbError);
-            }
-        } else if (error.message.includes('too large')) {
-            errorMessage = 'Video is too large to play';
-        } else if (error.message.includes('authenticated')) {
-            errorMessage = 'Please sign in to view videos';
-            const signInButton = document.createElement('button');
-            signInButton.innerHTML = 'Sign In';
-            signInButton.onclick = handleAuthClick;
-            signInButton.style.cssText = `
-                padding: 8px 16px;
-                background: #fe2c55;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                margin-top: 10px;
-                cursor: pointer;
-            `;
-            loadingDiv.appendChild(signInButton);
-        }
-        
-        loadingDiv.innerHTML = errorMessage;
+        loadingDiv.innerHTML = 'Error loading video. Please try again.';
     }
 }
 
@@ -605,11 +557,6 @@ function addVideoToFeed(videoData) {
 async function handleUpload(event) {
     event.preventDefault();
     
-    if (!gapi.client.getToken()) {
-        alert('Please sign in first');
-        return;
-    }
-    
     const videoFile = document.getElementById('videoFile').files[0];
     const title = document.getElementById('title').value;
     const description = document.getElementById('description').value;
@@ -619,28 +566,44 @@ async function handleUpload(event) {
     progressBar.style.display = 'block';
     
     try {
-        progress.style.width = '50%';
-        const driveResponse = await uploadToDrive(videoFile, title, description);
+        // Convert file to base64
+        const reader = new FileReader();
+        reader.readAsDataURL(videoFile);
         
-        progress.style.width = '75%';
-        await saveToRestDB(title, description, driveResponse.webContentLink);
-        
-        progress.style.width = '100%';
-        
-        await loadVideos();
-        
-        setTimeout(() => {
-            closeUploadModal();
-            progress.style.width = '0%';
-        }, 1000);
-        
+        reader.onload = async () => {
+            const base64Data = reader.result.split(',')[1];
+            
+            progress.style.width = '50%';
+            
+            const response = await fetch(`${APPS_SCRIPT_URL}?action=upload`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    filename: title,
+                    description: description,
+                    mimeType: videoFile.type,
+                    fileData: base64Data
+                })
+            });
+            
+            if (!response.ok) throw new Error('Upload failed');
+            
+            const result = await response.json();
+            if (result.status !== 'success') throw new Error(result.message);
+            
+            progress.style.width = '100%';
+            await loadVideos();
+            
+            setTimeout(() => {
+                closeUploadModal();
+                progress.style.width = '0%';
+            }, 1000);
+        };
     } catch (error) {
         console.error('Error in upload process:', error);
         alert('Error uploading video. Please try again.');
         progress.style.width = '0%';
     }
 }
-
 function openUploadModal() {
     if (!gapi.client.getToken()) {
         alert('Please sign in first');
