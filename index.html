@@ -261,45 +261,47 @@
             });
         }
 
-        async function handleAuthClick() {
-            tokenClient.callback = async (resp) => {
-                if (resp.error !== undefined) {
-                    throw (resp);
-                }
-                document.getElementById('signin-button').innerText = 'Signed In';
-                document.getElementById('signin-button').disabled = true;
-            };
+       async function handleAuthClick() {
+    if (!tokenClient) {
+        console.error('Token client not initialized');
+        return;
+    }
 
-            if (gapi.client.getToken() === null) {
-                tokenClient.requestAccessToken({prompt: 'consent'});
-            } else {
-                tokenClient.requestAccessToken({prompt: ''});
-            }
+    tokenClient.callback = async (resp) => {
+        if (resp.error !== undefined) {
+            throw resp;
         }
+        document.getElementById('signin-button').innerText = 'Signed In';
+        document.getElementById('signin-button').disabled = true;
+        // Reload videos after successful authentication
+        await loadVideos();
+    };
+
+    if (gapi.client.getToken() === null) {
+        tokenClient.requestAccessToken({prompt: 'consent'});
+    } else {
+        tokenClient.requestAccessToken({prompt: ''});
+    }
+}
 // Update the getGoogleDriveDirectUrl function
 async function getGoogleDriveDirectUrl(driveUrl) {
     const fileId = driveUrl.match(/[-\w]{25,}/);
     if (!fileId) return driveUrl;
     
     try {
-        // Use gapi client to fetch the file instead of direct access
-        const response = await gapi.client.drive.files.get({
-            fileId: fileId[0],
-            alt: 'media',
-            fields: 'id,name,size,webContentLink'
-        });
-        
-        // Get a temporary download URL that includes authentication
-        const downloadResponse = await gapi.client.drive.files.get({
-            fileId: fileId[0],
-            fields: 'webContentLink'
-        });
+        // First, ensure we have a valid access token
+        if (!gapi.client.getToken()) {
+            throw new Error('Not authenticated. Please sign in.');
+        }
 
-        // Transform the webContentLink to a direct download URL
-        let directUrl = downloadResponse.result.webContentLink;
-        directUrl = directUrl.replace('&export=download', '');
+        // Get the access token
+        const token = gapi.client.getToken().access_token;
         
-        return directUrl;
+        // Create a direct download URL with the access token
+        const directUrl = `https://www.googleapis.com/drive/v3/files/${fileId[0]}?alt=media`;
+        
+        // Return both the URL and token for authenticated fetching
+        return { url: directUrl, token };
     } catch (error) {
         console.error('Error getting direct URL:', error);
         throw error;
@@ -401,7 +403,6 @@ function addVideoToFeed(videoData) {
     const video = document.createElement('video');
     video.controls = true;
     video.muted = true;
-    video.crossOrigin = 'anonymous';
     video.preload = 'metadata';
     
     // Create a loading indicator
@@ -420,13 +421,23 @@ function addVideoToFeed(videoData) {
     `;
     videoItem.appendChild(loadingDiv);
 
+
     // Async function to set up video source
     const setupVideoSource = async () => {
         try {
-            const directUrl = await getGoogleDriveDirectUrl(videoData.videoUrl);
+            const { url, token } = await getGoogleDriveDirectUrl(videoData.videoUrl);
             
-            // Create blob URL from the response
-            const response = await fetch(directUrl);
+            // Fetch with authorization header
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
             const blob = await response.blob();
             const blobUrl = URL.createObjectURL(blob);
             
@@ -434,16 +445,28 @@ function addVideoToFeed(videoData) {
             loadingDiv.style.display = 'none';
             
             // Clean up blob URL when video is removed
-            video.onloadeddata = () => {
-                console.log('Video loaded successfully');
-            };
-            
             videoItem.addEventListener('remove', () => {
                 URL.revokeObjectURL(blobUrl);
             });
         } catch (error) {
             console.error('Error setting up video:', error);
-            loadingDiv.innerHTML = 'Error loading video. Please try again later.';
+            loadingDiv.innerHTML = 'Error loading video. Please sign in and try again.';
+            // If the error is auth-related, show sign-in button
+            if (error.message.includes('authenticated')) {
+                const signInButton = document.createElement('button');
+                signInButton.innerHTML = 'Sign In';
+                signInButton.onclick = handleAuthClick;
+                signInButton.style.cssText = `
+                    padding: 8px 16px;
+                    background: #fe2c55;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    margin-top: 10px;
+                    cursor: pointer;
+                `;
+                loadingDiv.appendChild(signInButton);
+            }
         }
     };
 
