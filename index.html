@@ -415,38 +415,125 @@ async function uploadToDrive(file, title, description) {
     }
 }
 // Update the setupVideoSource function to handle the preview URL
-async function setupVideoSource(video, loadingDiv, videoData) {
+function setupVideoSource(video, loadingDiv, videoData) {
     try {
-        const { url, mimeType, size } = await getGoogleDriveDirectUrl(videoData.videoUrl);
-        
-        // Create an iframe for the preview instead of using the video element
+        // Create iframe element
         const iframe = document.createElement('iframe');
-        iframe.src = url;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'iframe-wrapper';
+        
+        // Create loading overlay
+        const loadingOverlay = document.createElement('div');
+        loadingOverlay.className = 'loading-overlay';
+        loadingOverlay.innerHTML = `
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Click to play video</div>
+        `;
+        
+        // Add embedded=true parameter to the URL
+        const url = new URL(videoData.videoUrl);
+        if (!url.searchParams.has('embedded')) {
+            url.searchParams.append('embedded', 'true');
+        }
+        
+        iframe.src = url.toString();
         iframe.width = '100%';
         iframe.height = '100%';
         iframe.frameBorder = '0';
         iframe.allowFullscreen = true;
+        iframe.allow = 'autoplay; encrypted-media';
         
-        // Replace the video element with the iframe
-        video.parentNode.replaceChild(iframe, video);
-        loadingDiv.style.display = 'none';
+        // Add sandbox attribute for security
+        iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-presentation allow-forms';
+        
+        // Add click handler to loading overlay
+        loadingOverlay.addEventListener('click', () => {
+            loadingOverlay.style.opacity = '0';
+            setTimeout(() => {
+                loadingOverlay.remove();
+            }, 300);
+        });
 
+        // Handle iframe load event
+        iframe.onload = () => {
+            loadingDiv.style.display = 'none';
+            loadingOverlay.querySelector('.loading-text').textContent = 'Click to play video';
+        };
+        
+        // Add error handling
+        iframe.onerror = () => {
+            loadingDiv.innerHTML = 'Error loading video. Please try again.';
+            loadingDiv.style.display = 'block';
+        };
+
+        // Assemble the elements
+        wrapper.appendChild(iframe);
+        wrapper.appendChild(loadingOverlay);
+        video.parentNode.replaceChild(wrapper, video);
+        
     } catch (error) {
         console.error('Error setting up video:', error);
-        let errorMessage = 'Error loading video. Please try again.';
-        
-        if (error.message.includes('not found') || error.message.includes('inaccessible')) {
-            errorMessage = 'Video is no longer available';
-            try {
-                await removeVideoFromDatabase(videoData._id);
-            } catch (dbError) {
-                console.error('Error removing invalid video from database:', dbError);
-            }
-        }
-        
-        loadingDiv.innerHTML = errorMessage;
+        loadingDiv.innerHTML = 'Error loading video. Please try again.';
     }
 }
+
+const newStyles = `
+    .iframe-wrapper {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background: #000;
+    }
+
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        cursor: pointer;
+        transition: opacity 0.3s ease;
+    }
+
+    .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #fe2c55;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 15px;
+    }
+
+    .loading-text {
+        color: white;
+        font-size: 16px;
+        text-align: center;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    .video-item iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        background: #000;
+    }
+`;
+
+// Add the styles to the document
+const styleSheet = document.createElement('style');
+styleSheet.textContent = newStyles;
+document.head.appendChild(styleSheet);
+
 // Update the setupVideoSource function to handle the preview URL
 // Update the setupVideoSource function to handle the preview URL
 async function setupVideoSource(video, loadingDiv, videoData) {
