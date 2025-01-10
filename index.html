@@ -415,21 +415,17 @@ async function uploadToDrive(file, title, description) {
     }
 }
 // Update the setupVideoSource function to handle the preview URL
+let nextVideoToInit = null;
+
 function setupVideoSource(video, loadingDiv, videoData) {
     try {
-        // Create iframe element and wrapper
-        const iframe = document.createElement('iframe');
+        // Create iframe wrapper and elements
         const wrapper = document.createElement('div');
         wrapper.className = 'iframe-wrapper';
         
-        // Create overlay for manual interaction if needed
-        const clickOverlay = document.createElement('div');
-        clickOverlay.className = 'click-overlay';
-        
-        // Add embedded=true and autoplay=true parameters to the URL
+        const iframe = document.createElement('iframe');
         const url = new URL(videoData.videoUrl);
         url.searchParams.set('embedded', 'true');
-        url.searchParams.set('autoplay', '1');
         
         iframe.src = url.toString();
         iframe.width = '100%';
@@ -437,61 +433,70 @@ function setupVideoSource(video, loadingDiv, videoData) {
         iframe.frameBorder = '0';
         iframe.allowFullscreen = true;
         iframe.allow = 'autoplay; encrypted-media';
+        iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-presentation allow-forms';
+
+        // Create click overlay
+        const clickOverlay = document.createElement('div');
+        clickOverlay.className = 'click-overlay';
         
-        // Add all necessary permissions for the iframe
-        iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-presentation allow-forms allow-modals';
-        
-        // Handle iframe load
-        iframe.onload = () => {
-            loadingDiv.style.display = 'none';
-            
-            // Try to send play command to iframe
+        // Function to simulate click on the play button
+        const simulatePlayClick = () => {
             try {
+                // Try to click the play button inside the iframe
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                const playButton = iframeDoc.querySelector('.ytp-large-play-button');
+                if (playButton) {
+                    playButton.click();
+                }
+                
+                // Also try postMessage API
                 iframe.contentWindow.postMessage({
                     'event': 'command',
                     'func': 'playVideo',
                     'args': []
                 }, '*');
             } catch (e) {
-                console.log('Failed to send play command:', e);
+                console.log('Play simulation failed:', e);
             }
         };
 
-        // Listen for messages from the iframe
-        window.addEventListener('message', (event) => {
-            // Handle any messages from the iframe if needed
-            if (event.source === iframe.contentWindow) {
-                console.log('Message from iframe:', event.data);
+        // Handle click on the overlay
+        clickOverlay.addEventListener('click', () => {
+            simulatePlayClick();
+            
+            // Find and prepare the next video
+            const currentVideoItem = wrapper.closest('.video-item');
+            const nextVideoItem = currentVideoItem.nextElementSibling;
+            
+            if (nextVideoItem) {
+                const nextIframe = nextVideoItem.querySelector('iframe');
+                if (nextIframe) {
+                    // Store this as the next video to initialize
+                    nextVideoToInit = nextIframe;
+                }
             }
         });
 
-        // Set up Intersection Observer for this specific video
+        // Set up intersection observer
         const videoObserver = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
-                    // Try multiple approaches to start playback
-                    try {
-                        // Method 1: Direct click simulation
-                        const playButton = iframe.contentDocument?.querySelector('.ytp-large-play-button');
-                        if (playButton) {
-                            playButton.click();
-                        }
-
-                        // Method 2: PostMessage API
-                        iframe.contentWindow.postMessage({
-                            'event': 'command',
-                            'func': 'playVideo',
-                            'args': []
-                        }, '*');
-
-                        // Method 3: Simulate click on overlay
-                        clickOverlay.click();
-                    } catch (e) {
-                        console.log('Autoplay attempt failed:', e);
+                    // If this is the next video we stored earlier, auto-click its play button
+                    if (iframe === nextVideoToInit) {
+                        setTimeout(() => {
+                            simulatePlayClick();
+                            nextVideoToInit = null; // Reset after using
+                        }, 100);
                     }
                 }
             });
         }, { threshold: 0.7 });
+
+        // Handle iframe load
+        iframe.onload = () => {
+            loadingDiv.style.display = 'none';
+            videoObserver.observe(wrapper);
+        };
 
         // Handle errors
         iframe.onerror = () => {
@@ -504,9 +509,30 @@ function setupVideoSource(video, loadingDiv, videoData) {
         wrapper.appendChild(clickOverlay);
         video.parentNode.replaceChild(wrapper, video);
         
-        // Start observing
-        videoObserver.observe(wrapper);
-        
+        // Add styles if not already present
+        if (!document.getElementById('video-styles')) {
+            const styles = document.createElement('style');
+            styles.id = 'video-styles';
+            styles.textContent = `
+                .iframe-wrapper {
+                    position: relative;
+                    width: 100%;
+                    height: 100%;
+                    background: #000;
+                }
+                .click-overlay {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 1;
+                    cursor: pointer;
+                }
+            `;
+            document.head.appendChild(styles);
+        }
+
     } catch (error) {
         console.error('Error setting up video:', error);
         loadingDiv.innerHTML = 'Error loading video. Please try again.';
