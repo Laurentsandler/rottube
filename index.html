@@ -1,4 +1,4 @@
-i have some code here, i have a problem where if anyone but me trys to sign in the videos fail to load <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -219,24 +219,19 @@ i have some code here, i have a problem where if anyone but me trys to sign in t
     </div>
 
     <script>
-        // Configuration
-        const CLIENT_ID = '970895613115-to7bfjm55papkbmo8splc54ufo9nniv7.apps.googleusercontent.com';
-        const API_KEY = 'AIzaSyCbvDUWe9eIIcZEE33Rg45B_9-X2lFtjSc';
-        const RESTDB_API_KEY = '67800a19d5c4974faaf6b947';
-        const RESTDB_URL = 'https://rottube-48ac.restdb.io/rest/videos';
-        const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
-        const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+// Configuration
+const CLIENT_ID = '970895613115-to7bfjm55papkbmo8splc54ufo9nniv7.apps.googleusercontent.com';
+const API_KEY = 'AIzaSyCbvDUWe9eIIcZEE33Rg45B_9-X2lFtjSc';
+const RESTDB_API_KEY = '67800a19d5c4974faaf6b947';
+const RESTDB_URL = 'https://rottube-48ac.restdb.io/rest/videos';
+const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
-        let tokenClient;
+let tokenClient;
 let gapiInited = false;
 let gisInited = false;
 
-// Initialize the Google API
-document.addEventListener('DOMContentLoaded', function() {
-    loadVideos();
-    initializeGoogleAPI();
-});
-
+// Function Declarations
 function initializeGoogleAPI() {
     gapi.load('client', async () => {
         try {
@@ -261,7 +256,7 @@ function initializeGoogleAPI() {
     });
 }
 
-async function handleAuthClick() {
+function handleAuthClick() {
     if (!tokenClient) {
         console.error('Token client not initialized');
         return;
@@ -294,7 +289,7 @@ async function handleAuthClick() {
     });
 }
 
-aasync function getGoogleDriveDirectUrl(driveUrl) {
+async function getGoogleDriveDirectUrl(driveUrl) {
     const maxRetries = 3;
     let attempt = 0;
 
@@ -339,7 +334,7 @@ aasync function getGoogleDriveDirectUrl(driveUrl) {
                     }
                 });
 
-                // Generate a public URL using the webViewLink
+                // Generate a public URL
                 const publicUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
 
                 return {
@@ -364,6 +359,7 @@ aasync function getGoogleDriveDirectUrl(driveUrl) {
         }
     }
 }
+
 async function uploadToDrive(file, title, description) {
     const metadata = {
         name: title,
@@ -386,7 +382,7 @@ async function uploadToDrive(file, title, description) {
             {
                 method: 'POST',
                 headers: {
-                    'Authorization': Bearer ${token}
+                    'Authorization': `Bearer ${token}`
                 },
                 body: form
             }
@@ -411,7 +407,7 @@ async function uploadToDrive(file, title, description) {
 
         return {
             id: result.id,
-            webContentLink: https://www.googleapis.com/drive/v3/files/${result.id}?alt=media&key=${API_KEY}&supportsAllDrives=true,
+            webContentLink: `https://www.googleapis.com/drive/v3/files/${result.id}?alt=media&key=${API_KEY}&supportsAllDrives=true`,
             size: result.size,
             mimeType: result.mimeType
         };
@@ -420,6 +416,7 @@ async function uploadToDrive(file, title, description) {
         throw error;
     }
 }
+
 async function saveToRestDB(title, description, driveLink) {
     try {
         const response = await fetch(RESTDB_URL, {
@@ -446,11 +443,6 @@ async function saveToRestDB(title, description, driveLink) {
 
 async function loadVideos() {
     try {
-        // Ensure we're authenticated first
-        if (!gapi.client.getToken()) {
-            await handleAuthClick();
-        }
-
         const response = await fetch(RESTDB_URL, {
             method: 'GET',
             headers: {
@@ -480,9 +472,10 @@ async function loadVideos() {
         videoContainer.innerHTML = '<div class="error-message">Error loading videos. Please try again later.</div>';
     }
 }
+
 async function removeVideoFromDatabase(videoId) {
     try {
-        const response = await fetch(${RESTDB_URL}/${videoId}, {
+        const response = await fetch(`${RESTDB_URL}/${videoId}`, {
             method: 'DELETE',
             headers: {
                 'x-apikey': RESTDB_API_KEY,
@@ -546,7 +539,7 @@ function addVideoToFeed(videoData) {
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'video-loading';
     loadingDiv.innerHTML = 'Loading video...';
-    loadingDiv.style.cssText = 
+    loadingDiv.style.cssText = `
         position: absolute;
         top: 50%;
         left: 50%;
@@ -555,14 +548,14 @@ function addVideoToFeed(videoData) {
         color: white;
         padding: 1rem;
         border-radius: 4px;
-    ;
+    `;
 
     const videoInfo = document.createElement('div');
     videoInfo.className = 'video-info';
-    videoInfo.innerHTML = 
+    videoInfo.innerHTML = `
         <div class="video-title">${videoData.title}</div>
         <div class="video-description">${videoData.description}</div>
-    ;
+    `;
     
     videoItem.appendChild(video);
     videoItem.appendChild(loadingDiv);
@@ -619,12 +612,12 @@ function openUploadModal() {
         alert('Please sign in first');
         return;
     }
-    uploadModal.style.display = 'block';
+    document.getElementById('uploadModal').style.display = 'block';
 }
 
 function closeUploadModal() {
-    uploadModal.style.display = 'none';
-    uploadForm.reset();
+    document.getElementById('uploadModal').style.display = 'none';
+    document.getElementById('uploadForm').reset();
     const progressBar = document.getElementById('progressBar');
     const progress = document.getElementById('progress');
     progressBar.style.display = 'none';
@@ -653,17 +646,18 @@ const observer = new IntersectionObserver((entries) => {
     });
 }, { threshold: 0.7 });
 
-// Initialize modal elements
-const uploadModal = document.getElementById('uploadModal');
-const uploadForm = document.getElementById('uploadForm');
-
-// Add event listener for modal click-outside-to-close
-window.onclick = function(event) {
-    if (event.target === uploadModal) {
-        closeUploadModal();
-    }
-};
-
-    </script>
+// Initialize when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    loadVideos();
+    initializeGoogleAPI();
+    
+    // Add event listener for modal click-outside-to-close
+    window.onclick = function(event) {
+        if (event.target === document.getElementById('uploadModal')) {
+            closeUploadModal();
+        }
+    };
+});
+</script>
 </body>
 </html>
