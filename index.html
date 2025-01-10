@@ -544,18 +544,7 @@ const styleSheet = document.createElement('style');
 styleSheet.textContent = styles;
 document.head.appendChild(styleSheet);
 
-// Remove the old observer code from the bottom of your file and replace with this:
-document.addEventListener('DOMContentLoaded', function() {
-    loadVideos();
-    initializeGoogleAPI();
-    
-    // Add event listener for modal click-outside-to-close
-    window.onclick = function(event) {
-        if (event.target === document.getElementById('uploadModal')) {
-            closeUploadModal();
-        }
-    };
-});
+
 
 // Update the setupVideoSource function to handle the preview URL
 // Update the setupVideoSource function to handle the preview URL
@@ -877,7 +866,7 @@ const observer = new IntersectionObserver((entries) => {
     });
 }, { threshold: 0.7 });
 
-// Initialize when DOM is loaded
+// Remove the old observer code from the bottom of your file and replace with this:
 document.addEventListener('DOMContentLoaded', function() {
     loadVideos();
     initializeGoogleAPI();
