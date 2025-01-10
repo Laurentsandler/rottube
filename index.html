@@ -467,60 +467,7 @@ function addVideoToFeed(videoData) {
     setupVideoSource(video, loadingDiv, videoData);
     observer.observe(videoItem);
 }
-async function uploadToDrive(file, title, description) {
-    const metadata = {
-        name: title,
-        description: description,
-        mimeType: file.type,
-    };
-
-    try {
-        // Create a multipart request for both metadata and media
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', file);
-
-        // Get the access token
-        const token = gapi.client.getToken().access_token;
-
-        // Upload the file
-        const uploadResponse = await fetch(
-            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
-            {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                },
-                body: form
-            }
-        );
-
-        if (!uploadResponse.ok) {
-            throw new Error('Failed to upload file');
-        }
-
-        const result = await uploadResponse.json();
-
-        // Set public permission
-        await gapi.client.drive.permissions.create({
-            fileId: result.id,
-            resource: {
-                role: 'reader',
-                type: 'anyone',
-                allowFileDiscovery: false
-            }
-        });
-
-        // Return the preview URL format instead of the direct file URL
-        return {
-            id: result.id,
-            previewUrl: `https://drive.google.com/file/d/${result.id}/preview`
-        };
-    } catch (error) {
-        console.error('Error uploading to Drive:', error);
-        throw error;
-    }
-}
+<!DOCTYPE html>
 async function saveToRestDB(title, description, previewUrl) {
     try {
         const response = await fetch(RESTDB_URL, {
@@ -602,20 +549,38 @@ function setupVideoSource(video, loadingDiv, videoData) {
     try {
         // Create iframe element
         const iframe = document.createElement('iframe');
-        iframe.src = videoData.videoUrl; // Use the preview URL directly from the database
+        
+        // Add embedded=true parameter to the URL if it doesn't already exist
+        const url = new URL(videoData.videoUrl);
+        if (!url.searchParams.has('embedded')) {
+            url.searchParams.append('embedded', 'true');
+        }
+        
+        iframe.src = url.toString();
         iframe.width = '100%';
         iframe.height = '100%';
         iframe.frameBorder = '0';
         iframe.allowFullscreen = true;
         
+        // Add sandbox attribute for additional security
+        iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-presentation allow-forms';
+        
         // Replace the video element with the iframe
         video.parentNode.replaceChild(iframe, video);
         loadingDiv.style.display = 'none';
+        
+        // Add error handling for iframe load
+        iframe.onerror = () => {
+            loadingDiv.innerHTML = 'Error loading video. Please try again.';
+            loadingDiv.style.display = 'block';
+        };
+        
     } catch (error) {
         console.error('Error setting up video:', error);
         loadingDiv.innerHTML = 'Error loading video. Please try again.';
     }
 }
+
 
 
 function addVideoToFeed(videoData) {
@@ -677,7 +642,7 @@ async function handleUpload(event) {
         const driveResponse = await uploadToDrive(videoFile, title, description);
         
         progress.style.width = '75%';
-        await saveToRestDB(title, description, driveResponse.previewUrl);
+        await saveToRestDB(title, description, driveResponse.embedUrl);
         
         progress.style.width = '100%';
         
@@ -694,7 +659,23 @@ async function handleUpload(event) {
         progress.style.width = '0%';
     }
 }
-
+// Add some CSS to improve iframe container styling
+const style = document.createElement('style');
+style.textContent = `
+    .video-item iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        background: #000;
+    }
+    
+    .video-item {
+        position: relative;
+        overflow: hidden;
+        background: #000;
+    }
+`;
+document.head.appendChild(style);
 function openUploadModal() {
     if (!gapi.client.getToken()) {
         alert('Please sign in first');
