@@ -410,7 +410,7 @@ async function uploadToDrive(file, title, description) {
             embedUrl: `https://drive.google.com/file/d/${result.id}/preview?embedded=true`
         };
     } catch (error) {
-        console.error('Error uploading to Drive:', error);
+        console.error('Error uploading video: you must be a authorized uploader.');
         throw error;
     }
 }
