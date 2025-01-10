@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+i have some code here, i have a problem where if anyone but me trys to sign in the videos fail to load <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -226,8 +226,7 @@
         const RESTDB_URL = 'https://rottube-48ac.restdb.io/rest/videos';
         const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
         const SCOPES = 'https://www.googleapis.com/auth/drive.file';
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyuNoR-uZ3nm4kGdRqt0HRfxYQ_NLdGa7zaEE9R6Rw0BNhKKj0Gf9QXF86o2qMnKNYl/exec';
-        
+
         let tokenClient;
 let gapiInited = false;
 let gisInited = false;
@@ -295,19 +294,19 @@ async function handleAuthClick() {
     });
 }
 
-async function getGoogleDriveDirectUrl(driveUrl) {
+aasync function getGoogleDriveDirectUrl(driveUrl) {
     const maxRetries = 3;
     let attempt = 0;
 
     while (attempt < maxRetries) {
         try {
-            // Ensure the user is authenticated
+            // Check if we're authenticated
             const token = gapi.client.getToken();
             if (!token) {
                 await handleAuthClick();
             }
 
-            // Extract the file ID from the URL
+            // Extract file ID
             let fileId;
             if (driveUrl.includes('drive.google.com')) {
                 const match = driveUrl.match(/[-\w]{25,}/);
@@ -321,28 +320,37 @@ async function getGoogleDriveDirectUrl(driveUrl) {
                 throw new Error('Invalid Drive URL format');
             }
 
-            const currentToken = gapi.client.getToken()?.access_token;
-            if (!currentToken) {
-                throw new Error('No access token available');
-            }
-
-            // Ensure file permissions allow public access
             try {
+                // Get file metadata
+                const metadataResponse = await gapi.client.drive.files.get({
+                    fileId: fileId,
+                    fields: 'id,name,mimeType,size,capabilities,webContentLink'
+                });
+
+                const fileInfo = metadataResponse.result;
+
+                // Update sharing settings to make it publicly accessible
                 await gapi.client.drive.permissions.create({
                     fileId: fileId,
                     resource: {
                         role: 'reader',
                         type: 'anyone',
-                        allowFileDiscovery: false,
-                    },
+                        allowFileDiscovery: false
+                    }
                 });
-            } catch (permissionError) {
-                console.error('Failed to set file permissions:', permissionError);
-            }
 
-            // Construct the direct download URL
-            const fileUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
-            return { url: fileUrl, token: currentToken };
+                // Generate a public URL using the webViewLink
+                const publicUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+                return {
+                    url: publicUrl,
+                    mimeType: fileInfo.mimeType,
+                    size: fileInfo.size
+                };
+            } catch (error) {
+                console.error('Error accessing file:', error);
+                throw new Error('File is not accessible');
+            }
 
         } catch (error) {
             attempt++;
@@ -352,12 +360,10 @@ async function getGoogleDriveDirectUrl(driveUrl) {
                 throw error;
             }
 
-            // Exponential backoff before retrying
             await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
         }
     }
 }
-
 async function uploadToDrive(file, title, description) {
     const metadata = {
         name: title,
@@ -366,52 +372,54 @@ async function uploadToDrive(file, title, description) {
     };
 
     try {
+        // Create a multipart request for both metadata and media
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
         form.append('file', file);
 
-        const token = gapi.client.getToken()?.access_token;
+        // Get the access token
+        const token = gapi.client.getToken().access_token;
 
-        if (!token) {
-            await handleAuthClick();
-        }
-
+        // Upload the file
         const uploadResponse = await fetch(
-            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,size,mimeType',
             {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${token}`,
+                    'Authorization': Bearer ${token}
                 },
-                body: form,
+                body: form
             }
         );
 
         if (!uploadResponse.ok) {
-            throw new Error('File upload failed');
+            throw new Error('Failed to upload file');
         }
 
         const result = await uploadResponse.json();
-        const fileId = result.id;
 
-        // Set public permissions
+        // Set public permission
         await gapi.client.drive.permissions.create({
-            fileId: fileId,
+            fileId: result.id,
             resource: {
                 role: 'reader',
                 type: 'anyone',
-                allowFileDiscovery: false,
+                allowFileDiscovery: false
             },
+            fields: 'id'
         });
 
-        console.log('File uploaded successfully. File ID:', fileId);
-        return fileId;
+        return {
+            id: result.id,
+            webContentLink: https://www.googleapis.com/drive/v3/files/${result.id}?alt=media&key=${API_KEY}&supportsAllDrives=true,
+            size: result.size,
+            mimeType: result.mimeType
+        };
     } catch (error) {
-        console.error('Error during upload:', error);
+        console.error('Error uploading to Drive:', error);
         throw error;
     }
 }
-
 async function saveToRestDB(title, description, driveLink) {
     try {
         const response = await fetch(RESTDB_URL, {
@@ -438,35 +446,34 @@ async function saveToRestDB(title, description, driveLink) {
 
 async function loadVideos() {
     try {
-        const response = await fetch(`${APPS_SCRIPT_URL}?action=getVideos`, {
+        // Ensure we're authenticated first
+        if (!gapi.client.getToken()) {
+            await handleAuthClick();
+        }
+
+        const response = await fetch(RESTDB_URL, {
             method: 'GET',
-            mode: 'cors',
             headers: {
-                'Accept': 'application/json'
+                'x-apikey': RESTDB_API_KEY,
+                'Content-Type': 'application/json'
             }
         });
         
-        if (!response.ok) throw new Error('Failed to fetch videos');
+        if (!response.ok) {
+            throw new Error('Failed to fetch videos');
+        }
         
-        const result = await response.json();
-        if (result.status !== 'success') throw new Error(result.message);
-        
-        const videos = result.data;
+        const videos = await response.json();
         if (!Array.isArray(videos) || videos.length === 0) {
-            console.log('No videos found');
+            console.log('No videos found in database');
             return;
         }
 
+        const shuffledVideos = videos.sort(() => Math.random() - 0.5);
         const videoContainer = document.getElementById('videoContainer');
         videoContainer.innerHTML = '';
         
-        videos.forEach(video => {
-            addVideoToFeed({
-                title: video.name,
-                description: video.description || '',
-                videoUrl: video.id
-            });
-        });
+        shuffledVideos.forEach(addVideoToFeed);
     } catch (error) {
         console.error('Error loading videos:', error);
         const videoContainer = document.getElementById('videoContainer');
@@ -475,7 +482,7 @@ async function loadVideos() {
 }
 async function removeVideoFromDatabase(videoId) {
     try {
-        const response = await fetch(`${RESTDB_URL}/${videoId}`, {
+        const response = await fetch(${RESTDB_URL}/${videoId}, {
             method: 'DELETE',
             headers: {
                 'x-apikey': RESTDB_API_KEY,
@@ -496,21 +503,10 @@ async function removeVideoFromDatabase(videoId) {
 
 async function setupVideoSource(video, loadingDiv, videoData) {
     try {
-        const response = await fetch(`${APPS_SCRIPT_URL}?action=getVideo&fileId=${videoData.videoUrl}`, {
-            method: 'GET',
-            mode: 'cors',
-            headers: {
-                'Accept': 'application/json'
-            }
-        });
+        const { url, mimeType, size } = await getGoogleDriveDirectUrl(videoData.videoUrl);
         
-        if (!response.ok) throw new Error('Failed to get video URL');
-        
-        const result = await response.json();
-        if (result.status !== 'success') throw new Error(result.message);
-        
-        video.src = result.url;
-        
+        video.src = url;
+
         video.onloadeddata = () => {
             loadingDiv.style.display = 'none';
             console.log('Video loaded successfully');
@@ -520,11 +516,24 @@ async function setupVideoSource(video, loadingDiv, videoData) {
             console.error('Video error:', e);
             loadingDiv.innerHTML = 'Error playing video. Please try again.';
         };
+
     } catch (error) {
         console.error('Error setting up video:', error);
-        loadingDiv.innerHTML = 'Error loading video. Please try again.';
+        let errorMessage = 'Error loading video. Please try again.';
+        
+        if (error.message.includes('not found') || error.message.includes('inaccessible')) {
+            errorMessage = 'Video is no longer available';
+            try {
+                await removeVideoFromDatabase(videoData._id);
+            } catch (dbError) {
+                console.error('Error removing invalid video from database:', dbError);
+            }
+        }
+        
+        loadingDiv.innerHTML = errorMessage;
     }
 }
+
 function addVideoToFeed(videoData) {
     const videoItem = document.createElement('div');
     videoItem.className = 'video-item';
@@ -537,7 +546,7 @@ function addVideoToFeed(videoData) {
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'video-loading';
     loadingDiv.innerHTML = 'Loading video...';
-    loadingDiv.style.cssText = `
+    loadingDiv.style.cssText = 
         position: absolute;
         top: 50%;
         left: 50%;
@@ -546,14 +555,14 @@ function addVideoToFeed(videoData) {
         color: white;
         padding: 1rem;
         border-radius: 4px;
-    `;
+    ;
 
     const videoInfo = document.createElement('div');
     videoInfo.className = 'video-info';
-    videoInfo.innerHTML = `
+    videoInfo.innerHTML = 
         <div class="video-title">${videoData.title}</div>
         <div class="video-description">${videoData.description}</div>
-    `;
+    ;
     
     videoItem.appendChild(video);
     videoItem.appendChild(loadingDiv);
@@ -566,9 +575,13 @@ function addVideoToFeed(videoData) {
     observer.observe(videoItem);
 }
 
-
 async function handleUpload(event) {
     event.preventDefault();
+    
+    if (!gapi.client.getToken()) {
+        alert('Please sign in first');
+        return;
+    }
     
     const videoFile = document.getElementById('videoFile').files[0];
     const title = document.getElementById('title').value;
@@ -579,48 +592,28 @@ async function handleUpload(event) {
     progressBar.style.display = 'block';
     
     try {
-        const reader = new FileReader();
-        reader.readAsDataURL(videoFile);
+        progress.style.width = '50%';
+        const driveResponse = await uploadToDrive(videoFile, title, description);
         
-        reader.onload = async () => {
-            const base64Data = reader.result.split(',')[1];
-            
-            progress.style.width = '50%';
-            
-            const response = await fetch(`${APPS_SCRIPT_URL}?action=upload`, {
-                method: 'POST',
-                mode: 'cors',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify({
-                    filename: title,
-                    description: description,
-                    mimeType: videoFile.type,
-                    fileData: base64Data
-                })
-            });
-            
-            if (!response.ok) throw new Error('Upload failed');
-            
-            const result = await response.json();
-            if (result.status !== 'success') throw new Error(result.message);
-            
-            progress.style.width = '100%';
-            await loadVideos();
-            
-            setTimeout(() => {
-                closeUploadModal();
-                progress.style.width = '0%';
-            }, 1000);
-        };
+        progress.style.width = '75%';
+        await saveToRestDB(title, description, driveResponse.webContentLink);
+        
+        progress.style.width = '100%';
+        
+        await loadVideos();
+        
+        setTimeout(() => {
+            closeUploadModal();
+            progress.style.width = '0%';
+        }, 1000);
+        
     } catch (error) {
         console.error('Error in upload process:', error);
         alert('Error uploading video. Please try again.');
         progress.style.width = '0%';
     }
 }
+
 function openUploadModal() {
     if (!gapi.client.getToken()) {
         alert('Please sign in first');
