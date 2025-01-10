@@ -422,15 +422,14 @@ function setupVideoSource(video, loadingDiv, videoData) {
         const wrapper = document.createElement('div');
         wrapper.className = 'iframe-wrapper';
         
-        // Create overlay that will receive the auto-click
+        // Create overlay for manual interaction if needed
         const clickOverlay = document.createElement('div');
         clickOverlay.className = 'click-overlay';
         
-        // Add embedded=true parameter to the URL
+        // Add embedded=true and autoplay=true parameters to the URL
         const url = new URL(videoData.videoUrl);
-        if (!url.searchParams.has('embedded')) {
-            url.searchParams.append('embedded', 'true');
-        }
+        url.searchParams.set('embedded', 'true');
+        url.searchParams.set('autoplay', '1');
         
         iframe.src = url.toString();
         iframe.width = '100%';
@@ -438,14 +437,63 @@ function setupVideoSource(video, loadingDiv, videoData) {
         iframe.frameBorder = '0';
         iframe.allowFullscreen = true;
         iframe.allow = 'autoplay; encrypted-media';
-        iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-presentation allow-forms';
         
-        // Handle iframe load event
+        // Add all necessary permissions for the iframe
+        iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-presentation allow-forms allow-modals';
+        
+        // Handle iframe load
         iframe.onload = () => {
             loadingDiv.style.display = 'none';
+            
+            // Try to send play command to iframe
+            try {
+                iframe.contentWindow.postMessage({
+                    'event': 'command',
+                    'func': 'playVideo',
+                    'args': []
+                }, '*');
+            } catch (e) {
+                console.log('Failed to send play command:', e);
+            }
         };
-        
-        // Add error handling
+
+        // Listen for messages from the iframe
+        window.addEventListener('message', (event) => {
+            // Handle any messages from the iframe if needed
+            if (event.source === iframe.contentWindow) {
+                console.log('Message from iframe:', event.data);
+            }
+        });
+
+        // Set up Intersection Observer for this specific video
+        const videoObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    // Try multiple approaches to start playback
+                    try {
+                        // Method 1: Direct click simulation
+                        const playButton = iframe.contentDocument?.querySelector('.ytp-large-play-button');
+                        if (playButton) {
+                            playButton.click();
+                        }
+
+                        // Method 2: PostMessage API
+                        iframe.contentWindow.postMessage({
+                            'event': 'command',
+                            'func': 'playVideo',
+                            'args': []
+                        }, '*');
+
+                        // Method 3: Simulate click on overlay
+                        clickOverlay.click();
+                    } catch (e) {
+                        console.log('Autoplay attempt failed:', e);
+                    }
+                }
+            });
+        }, { threshold: 0.7 });
+
+        // Handle errors
         iframe.onerror = () => {
             loadingDiv.innerHTML = 'Error loading video. Please try again.';
             loadingDiv.style.display = 'block';
@@ -456,27 +504,7 @@ function setupVideoSource(video, loadingDiv, videoData) {
         wrapper.appendChild(clickOverlay);
         video.parentNode.replaceChild(wrapper, video);
         
-        // Set up Intersection Observer for this specific video
-        const videoObserver = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting && entry.intersectionRatio >= 0.7) {
-                    // Simulate click when video comes into view
-                    setTimeout(() => {
-                        const clickEvent = new MouseEvent('click', {
-                            view: window,
-                            bubbles: true,
-                            cancelable: true
-                        });
-                        clickOverlay.dispatchEvent(clickEvent);
-                    }, 500); // Small delay to ensure iframe is ready
-                    
-                    // Disconnect observer after first play
-                    videoObserver.disconnect();
-                }
-            });
-        }, { threshold: 0.7 });
-
-        // Start observing the wrapper
+        // Start observing
         videoObserver.observe(wrapper);
         
     } catch (error) {
@@ -484,7 +512,8 @@ function setupVideoSource(video, loadingDiv, videoData) {
         loadingDiv.innerHTML = 'Error loading video. Please try again.';
     }
 }
-const newStyles = `
+
+const styles = `
     .iframe-wrapper {
         position: relative;
         width: 100%;
@@ -512,7 +541,7 @@ const newStyles = `
 
 // Add the styles to the document
 const styleSheet = document.createElement('style');
-styleSheet.textContent = newStyles;
+styleSheet.textContent = styles;
 document.head.appendChild(styleSheet);
 
 // Remove the old observer code from the bottom of your file and replace with this:
@@ -568,7 +597,6 @@ function addVideoToFeed(videoData) {
     const videoItem = document.createElement('div');
     videoItem.className = 'video-item';
     
-    // We still create a video element initially (it will be replaced with iframe)
     const video = document.createElement('video');
     
     const loadingDiv = document.createElement('div');
@@ -600,7 +628,6 @@ function addVideoToFeed(videoData) {
     videoContainer.appendChild(videoItem);
     
     setupVideoSource(video, loadingDiv, videoData);
-    observer.observe(videoItem);
 }
 
 async function saveToRestDB(title, description, previewUrl) {
