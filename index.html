@@ -334,11 +334,11 @@ async function getGoogleDriveDirectUrl(driveUrl) {
                     }
                 });
 
-                // Generate a public URL
-                const publicUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+                // Generate a preview URL
+                const previewUrl = `https://drive.google.com/file/d/${fileId}/preview`;
 
                 return {
-                    url: publicUrl,
+                    url: previewUrl,
                     mimeType: fileInfo.mimeType,
                     size: fileInfo.size
                 };
@@ -360,6 +360,113 @@ async function getGoogleDriveDirectUrl(driveUrl) {
     }
 }
 
+// Update the setupVideoSource function to handle the preview URL
+async function setupVideoSource(video, loadingDiv, videoData) {
+    try {
+        const { url, mimeType, size } = await getGoogleDriveDirectUrl(videoData.videoUrl);
+        
+        // Create an iframe for the preview instead of using the video element
+        const iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.width = '100%';
+        iframe.height = '100%';
+        iframe.frameBorder = '0';
+        iframe.allowFullscreen = true;
+        
+        // Replace the video element with the iframe
+        video.parentNode.replaceChild(iframe, video);
+        loadingDiv.style.display = 'none';
+
+    } catch (error) {
+        console.error('Error setting up video:', error);
+        let errorMessage = 'Error loading video. Please try again.';
+        
+        if (error.message.includes('not found') || error.message.includes('inaccessible')) {
+            errorMessage = 'Video is no longer available';
+            try {
+                await removeVideoFromDatabase(videoData._id);
+            } catch (dbError) {
+                console.error('Error removing invalid video from database:', dbError);
+            }
+        }
+        
+        loadingDiv.innerHTML = errorMessage;
+    }
+}
+// Update the setupVideoSource function to handle the preview URL
+// Update the setupVideoSource function to handle the preview URL
+async function setupVideoSource(video, loadingDiv, videoData) {
+    try {
+        const { url, mimeType, size } = await getGoogleDriveDirectUrl(videoData.videoUrl);
+        
+        // Create an iframe for the preview instead of using the video element
+        const iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.width = '100%';
+        iframe.height = '100%';
+        iframe.frameBorder = '0';
+        iframe.allowFullscreen = true;
+        
+        // Replace the video element with the iframe
+        video.parentNode.replaceChild(iframe, video);
+        loadingDiv.style.display = 'none';
+
+    } catch (error) {
+        console.error('Error setting up video:', error);
+        let errorMessage = 'Error loading video. Please try again.';
+        
+        if (error.message.includes('not found') || error.message.includes('inaccessible')) {
+            errorMessage = 'Video is no longer available';
+            try {
+                await removeVideoFromDatabase(videoData._id);
+            } catch (dbError) {
+                console.error('Error removing invalid video from database:', dbError);
+            }
+        }
+        
+        loadingDiv.innerHTML = errorMessage;
+    }
+}
+
+// Update the addVideoToFeed function to handle iframe-based preview
+function addVideoToFeed(videoData) {
+    const videoItem = document.createElement('div');
+    videoItem.className = 'video-item';
+    
+    // We still create a video element initially (it will be replaced with iframe)
+    const video = document.createElement('video');
+    
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'video-loading';
+    loadingDiv.innerHTML = 'Loading video...';
+    loadingDiv.style.cssText = `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 1rem;
+        border-radius: 4px;
+    `;
+
+    const videoInfo = document.createElement('div');
+    videoInfo.className = 'video-info';
+    videoInfo.innerHTML = `
+        <div class="video-title">${videoData.title}</div>
+        <div class="video-description">${videoData.description}</div>
+    `;
+    
+    videoItem.appendChild(video);
+    videoItem.appendChild(loadingDiv);
+    videoItem.appendChild(videoInfo);
+    
+    const videoContainer = document.getElementById('videoContainer');
+    videoContainer.appendChild(videoItem);
+    
+    setupVideoSource(video, loadingDiv, videoData);
+    observer.observe(videoItem);
+}
 async function uploadToDrive(file, title, description) {
     const metadata = {
         name: title,
