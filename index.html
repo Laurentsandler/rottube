@@ -485,7 +485,7 @@ async function uploadToDrive(file, title, description) {
 
         // Upload the file
         const uploadResponse = await fetch(
-            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,size,mimeType',
+            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
             {
                 method: 'POST',
                 headers: {
@@ -508,23 +508,20 @@ async function uploadToDrive(file, title, description) {
                 role: 'reader',
                 type: 'anyone',
                 allowFileDiscovery: false
-            },
-            fields: 'id'
+            }
         });
 
+        // Return the preview URL format instead of the direct file URL
         return {
             id: result.id,
-            webContentLink: `https://www.googleapis.com/drive/v3/files/${result.id}?alt=media&key=${API_KEY}&supportsAllDrives=true`,
-            size: result.size,
-            mimeType: result.mimeType
+            previewUrl: `https://drive.google.com/file/d/${result.id}/preview`
         };
     } catch (error) {
         console.error('Error uploading to Drive:', error);
         throw error;
     }
 }
-
-async function saveToRestDB(title, description, driveLink) {
+async function saveToRestDB(title, description, previewUrl) {
     try {
         const response = await fetch(RESTDB_URL, {
             method: 'POST',
@@ -535,7 +532,7 @@ async function saveToRestDB(title, description, driveLink) {
             body: JSON.stringify({
                 title: title,
                 description: description,
-                videoUrl: driveLink,
+                videoUrl: previewUrl, // Save the preview URL directly
                 timestamp: new Date().toISOString()
             })
         });
@@ -601,47 +598,32 @@ async function removeVideoFromDatabase(videoId) {
     }
 }
 
-async function setupVideoSource(video, loadingDiv, videoData) {
+function setupVideoSource(video, loadingDiv, videoData) {
     try {
-        const { url, mimeType, size } = await getGoogleDriveDirectUrl(videoData.videoUrl);
+        // Create iframe element
+        const iframe = document.createElement('iframe');
+        iframe.src = videoData.videoUrl; // Use the preview URL directly from the database
+        iframe.width = '100%';
+        iframe.height = '100%';
+        iframe.frameBorder = '0';
+        iframe.allowFullscreen = true;
         
-        video.src = url;
-
-        video.onloadeddata = () => {
-            loadingDiv.style.display = 'none';
-            console.log('Video loaded successfully');
-        };
-
-        video.onerror = (e) => {
-            console.error('Video error:', e);
-            loadingDiv.innerHTML = 'Error playing video. Please try again.';
-        };
-
+        // Replace the video element with the iframe
+        video.parentNode.replaceChild(iframe, video);
+        loadingDiv.style.display = 'none';
     } catch (error) {
         console.error('Error setting up video:', error);
-        let errorMessage = 'Error loading video. Please try again.';
-        
-        if (error.message.includes('not found') || error.message.includes('inaccessible')) {
-            errorMessage = 'Video is no longer available';
-            try {
-                await removeVideoFromDatabase(videoData._id);
-            } catch (dbError) {
-                console.error('Error removing invalid video from database:', dbError);
-            }
-        }
-        
-        loadingDiv.innerHTML = errorMessage;
+        loadingDiv.innerHTML = 'Error loading video. Please try again.';
     }
 }
+
 
 function addVideoToFeed(videoData) {
     const videoItem = document.createElement('div');
     videoItem.className = 'video-item';
     
+    // Create a temporary video element (will be replaced with iframe)
     const video = document.createElement('video');
-    video.controls = true;
-    video.muted = true;
-    video.playsInline = true;
     
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'video-loading';
@@ -672,7 +654,6 @@ function addVideoToFeed(videoData) {
     videoContainer.appendChild(videoItem);
     
     setupVideoSource(video, loadingDiv, videoData);
-    observer.observe(videoItem);
 }
 
 async function handleUpload(event) {
@@ -696,7 +677,7 @@ async function handleUpload(event) {
         const driveResponse = await uploadToDrive(videoFile, title, description);
         
         progress.style.width = '75%';
-        await saveToRestDB(title, description, driveResponse.webContentLink);
+        await saveToRestDB(title, description, driveResponse.previewUrl);
         
         progress.style.width = '100%';
         
