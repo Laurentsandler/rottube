@@ -858,6 +858,29 @@ function openUploadModal() {
         alert('Please sign in first');
         return;
     }
+    
+    // Get the form element
+    const form = document.getElementById('uploadForm');
+    
+    // Create the authorization message div if it doesn't exist
+    if (!document.getElementById('auth-message')) {
+        const authMessage = document.createElement('div');
+        authMessage.id = 'auth-message';
+        authMessage.style.cssText = 'margin-bottom: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;';
+        authMessage.innerHTML = `
+            <p style="margin-bottom: 10px; color: #333; font-weight: bold;">⚠️ Important Notice:</p>
+            <p style="color: #555; line-height: 1.4;">To upload videos, you must be an authorized uploader. To become authorized:</p>
+            <ol style="color: #555; margin: 10px 0 0 20px; line-height: 1.4;">
+                <li>Email <a href="mailto:sandlerlaurent@gmail.com" style="color: #fe2c55; text-decoration: none;">sandlerlaurent@gmail.com</a></li>
+                <li>Include your preferred upload email address</li>
+                <li>Await confirmation of your authorization</li>
+            </ol>
+        `;
+        
+        // Insert the message before the form
+        form.parentNode.insertBefore(authMessage, form);
+    }
+    
     document.getElementById('uploadModal').style.display = 'block';
 }
 
