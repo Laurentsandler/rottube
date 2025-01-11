@@ -525,7 +525,53 @@ function addVideoToFeed(videoData) {
             <span class="reaction-count">${videoData.dislikes || 0}</span>
         </button>
     `;
+async function updateReaction(videoId, action, userId) {
+    try {
+        // First get current video data
+        const getResponse = await fetch(`${RESTDB_URL}/${videoId}`, {
+            method: 'GET',
+            headers: {
+                'x-apikey': RESTDB_API_KEY,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!getResponse.ok) throw new Error('Failed to fetch video data');
+        const videoData = await getResponse.json();
+        
+        // Remove user from both arrays first (in case they're switching their vote)
+        const likedBy = videoData.likedBy?.filter(id => id !== userId) || [];
+        const dislikedBy = videoData.dislikedBy?.filter(id => id !== userId) || [];
+        
+        // Update appropriate array based on action
+        if (action === 'like') {
+            likedBy.push(userId);
+        } else if (action === 'dislike') {
+            dislikedBy.push(userId);
+        }
+        
+        // Update the database
+        const updateResponse = await fetch(`${RESTDB_URL}/${videoId}`, {
+            method: 'PUT',
+            headers: {
+                'x-apikey': RESTDB_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                likes: likedBy.length,
+                dislikes: dislikedBy.length,
+                likedBy: likedBy,
+                dislikedBy: dislikedBy
+            })
+        });
 
+        if (!updateResponse.ok) throw new Error('Failed to update reaction');
+        return await updateResponse.json();
+    } catch (error) {
+        console.error('Error updating reaction:', error);
+        throw error;
+    }
+}
     // Add event listeners to reaction buttons
     reactionButtons.querySelectorAll('.reaction-btn').forEach(button => {
         button.addEventListener('click', async (e) => {
