@@ -232,6 +232,93 @@ let tokenClient;
 let gapiInited = false;
 let gisInited = false;
 
+// Combine all styles into one declaration
+const styles = `
+    .iframe-wrapper {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background: #000;
+    }
+
+    .click-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+        cursor: pointer;
+    }
+
+    .video-item iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        background: #000;
+    }
+
+    .reaction-buttons {
+        position: absolute;
+        right: 20px;
+        bottom: 80px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        z-index: 100;
+    }
+
+    .reaction-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        color: white;
+    }
+
+    .reaction-btn:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+
+    .reaction-btn.active {
+        background: rgba(255, 255, 255, 0.3);
+    }
+
+    .reaction-icon {
+        font-size: 1.2em;
+        margin-bottom: 2px;
+    }
+
+    .reaction-count {
+        font-size: 0.8em;
+        color: rgba(255, 255, 255, 0.8);
+    }
+
+    .video-item {
+        position: relative;
+        overflow: hidden;
+        background: #000;
+    }
+
+    .view-count {
+        font-size: 0.8em;
+        color: rgba(255, 255, 255, 0.8);
+        margin-top: 4px;
+    }
+`;
+
+// Add styles to document once
+const styleSheet = document.createElement('style');
+styleSheet.textContent = styles;
+document.head.appendChild(styleSheet);
+
 // Function Declarations
 function initializeGoogleAPI() {
     gapi.load('client', async () => {
@@ -360,377 +447,6 @@ async function getGoogleDriveDirectUrl(driveUrl) {
         }
     }
 }
-async function uploadToDrive(file, title, description) {
-    const metadata = {
-        name: title,
-        description: description,
-        mimeType: file.type,
-    };
-
-    try {
-        // Create a multipart request for both metadata and media
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', file);
-
-        // Get the access token
-        const token = gapi.client.getToken().access_token;
-
-        // Upload the file
-        const uploadResponse = await fetch(
-            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
-            {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                },
-                body: form
-            }
-        );
-
-        if (!uploadResponse.ok) {
-            throw new Error('Failed to upload file');
-        }
-
-        const result = await uploadResponse.json();
-
-        // Set public permission
-        await gapi.client.drive.permissions.create({
-            fileId: result.id,
-            resource: {
-                role: 'reader',
-                type: 'anyone',
-                allowFileDiscovery: false
-            }
-        });
-
-        // Return the embed URL format
-        return {
-            id: result.id,
-            embedUrl: `https://drive.google.com/file/d/${result.id}/preview?embedded=true`
-        };
-    } catch (error) {
-        console.error('Error uploading video: you must be a authorized uploader.');
-        throw error;
-    }
-}
-// Update the setupVideoSource function to handle the preview URL
-let nextVideoToInit = null;
-
-function setupVideoSource(video, loadingDiv, videoData) {
-    try {
-        const iframe = document.createElement('iframe');
-        const url = new URL(videoData.videoUrl);
-        url.searchParams.set('embedded', 'true');
-        
-        iframe.src = url.toString();
-        iframe.width = '100%';
-        iframe.height = '100%';
-        iframe.frameBorder = '0';
-        iframe.allowFullscreen = true;
-        iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-presentation allow-forms';
-
-        // Create a flag to track if view has been counted
-        let viewCounted = false;
-
-        // Create intersection observer for view counting
-        const viewObserver = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting && !viewCounted) {
-                    // Start a timer when video becomes visible
-                    const startTime = Date.now();
-                    
-                    // Check video duration and progress periodically
-                    const checkInterval = setInterval(async () => {
-                        try {
-                            const timeWatched = (Date.now() - startTime) / 1000; // Convert to seconds
-                            
-                            // Assuming average video duration of 60 seconds for TikTok-style videos
-                            // Count view if watched more than half (30 seconds)
-                            if (timeWatched > 30 && !viewCounted) {
-                                viewCounted = true;
-                                clearInterval(checkInterval);
-                                
-                                // Increment view count in database
-                                await incrementViews(videoData._id);
-                                
-                                // Update view count in UI if displayed
-                                const viewCountElement = entry.target.querySelector('.view-count');
-                                if (viewCountElement) {
-                                    const currentViews = parseInt(viewCountElement.textContent) || 0;
-                                    viewCountElement.textContent = `${currentViews + 1} views`;
-                                }
-                            }
-                        } catch (error) {
-                            console.error('Error updating view count:', error);
-                            clearInterval(checkInterval);
-                        }
-                    }, 1000); // Check every second
-                    
-                    // Clean up interval when video is no longer visible
-                    if (!entry.isIntersecting) {
-                        clearInterval(checkInterval);
-                    }
-                }
-            });
-        }, { threshold: 0.5 }); // Trigger when 50% of video is visible
-
-        // Observe the video container
-        viewObserver.observe(iframe.parentElement);
-        
-        // Replace video element with iframe
-        video.parentNode.replaceChild(iframe, video);
-        loadingDiv.style.display = 'none';
-
-    } catch (error) {
-        console.error('Error setting up video:', error);
-        loadingDiv.innerHTML = 'Error loading video. Please try again.';
-    }
-}
-
-const styles = `
-    .iframe-wrapper {
-        position: relative;
-        width: 100%;
-        height: 100%;
-        background: #000;
-    }
-
-    .click-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        z-index: 1;
-        cursor: pointer;
-    }
-
-    .video-item iframe {
-        width: 100%;
-        height: 100%;
-        border: none;
-        background: #000;
-    }
-`;
-
-// Add the styles to the document
-const styleSheet = document.createElement('style');
-styleSheet.textContent = styles;
-document.head.appendChild(styleSheet);
-
-
-
-// Update the setupVideoSource function to handle the preview URL
-// Update the setupVideoSource function to handle the preview URL
-async function setupVideoSource(video, loadingDiv, videoData) {
-    try {
-        const { url, mimeType, size } = await getGoogleDriveDirectUrl(videoData.videoUrl);
-        
-        // Create an iframe for the preview instead of using the video element
-        const iframe = document.createElement('iframe');
-        iframe.src = url;
-        iframe.width = '100%';
-        iframe.height = '100%';
-        iframe.frameBorder = '0';
-        iframe.allowFullscreen = true;
-        
-        // Replace the video element with the iframe
-        video.parentNode.replaceChild(iframe, video);
-        loadingDiv.style.display = 'none';
-
-    } catch (error) {
-        console.error('Error setting up video:', error);
-        let errorMessage = 'Error loading video. Please try again.';
-        
-        if (error.message.includes('not found') || error.message.includes('inaccessible')) {
-            errorMessage = 'Video is no longer available';
-            try {
-                await removeVideoFromDatabase(videoData._id);
-            } catch (dbError) {
-                console.error('Error removing invalid video from database:', dbError);
-            }
-        }
-        
-        loadingDiv.innerHTML = errorMessage;
-    }
-}
-
-// Update the addVideoToFeed function to handle iframe-based preview
-function addVideoToFeed(videoData) {
-    const videoItem = document.createElement('div');
-    videoItem.className = 'video-item';
-    
-    const video = document.createElement('video');
-    
-    const loadingDiv = document.createElement('div');
-    loadingDiv.className = 'video-loading';
-    loadingDiv.innerHTML = 'Loading video...';
-    loadingDiv.style.cssText = `
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 1rem;
-        border-radius: 4px;
-    `;
-
-    const videoInfo = document.createElement('div');
-    videoInfo.className = 'video-info';
-    videoInfo.innerHTML = `
-        <div class="video-title">${videoData.title}</div>
-        <div class="video-description">${videoData.description}</div>
-        <div class="view-count">${videoData.views || 0} views</div>
-    `;
-    
-    videoItem.appendChild(video);
-    videoItem.appendChild(loadingDiv);
-    videoItem.appendChild(videoInfo);
-    
-    const videoContainer = document.getElementById('videoContainer');
-    videoContainer.appendChild(videoItem);
-    
-    setupVideoSource(video, loadingDiv, videoData);
-}
-const viewCountStyles = `
-    .view-count {
-        font-size: 0.8em;
-        color: rgba(255, 255, 255, 0.8);
-        margin-top: 4px;
-    }
-`;
-
-
-
-async function saveToRestDB(title, description, previewUrl) {
-    try {
-        const response = await fetch(RESTDB_URL, {
-            method: 'POST',
-            headers: {
-                'x-apikey': RESTDB_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                title: title,
-                description: description,
-                videoUrl: previewUrl,
-                timestamp: new Date().toISOString(),
-                likes: 0,
-                dislikes: 0,
-                likedBy: [],    // Store user IDs who liked
-                dislikedBy: []  // Store user IDs who disliked
-            })
-        });
-
-        if (!response.ok) throw new Error('Failed to save to RestDB');
-        return await response.json();
-    } catch (error) {
-        console.error('Error saving to RestDB:', error);
-        throw error;
-    }
-}
-
-async function updateReaction(videoId, action, userId) {
-    try {
-        // First get current video data
-        const getResponse = await fetch(`${RESTDB_URL}/${videoId}`, {
-            method: 'GET',
-            headers: {
-                'x-apikey': RESTDB_API_KEY,
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        if (!getResponse.ok) throw new Error('Failed to fetch video data');
-        const videoData = await getResponse.json();
-        
-        // Remove user from both arrays first (in case they're switching their vote)
-        const likedBy = videoData.likedBy?.filter(id => id !== userId) || [];
-        const dislikedBy = videoData.dislikedBy?.filter(id => id !== userId) || [];
-        
-        // Update appropriate array based on action
-        if (action === 'like') {
-            likedBy.push(userId);
-        } else if (action === 'dislike') {
-            dislikedBy.push(userId);
-        }
-        
-        // Update the database
-        const updateResponse = await fetch(`${RESTDB_URL}/${videoId}`, {
-            method: 'PUT',
-            headers: {
-                'x-apikey': RESTDB_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                likes: likedBy.length,
-                dislikes: dislikedBy.length,
-                likedBy: likedBy,
-                dislikedBy: dislikedBy
-            })
-        });
-
-        if (!updateResponse.ok) throw new Error('Failed to update reaction');
-        return await updateResponse.json();
-    } catch (error) {
-        console.error('Error updating reaction:', error);
-        throw error;
-    }
-}
-async function loadVideos() {
-    try {
-        const response = await fetch(RESTDB_URL, {
-            method: 'GET',
-            headers: {
-                'x-apikey': RESTDB_API_KEY,
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        if (!response.ok) {
-            throw new Error('Failed to fetch videos');
-        }
-        
-        const videos = await response.json();
-        if (!Array.isArray(videos) || videos.length === 0) {
-            console.log('No videos found in database');
-            return;
-        }
-
-        const shuffledVideos = videos.sort(() => Math.random() - 0.5);
-        const videoContainer = document.getElementById('videoContainer');
-        videoContainer.innerHTML = '';
-        
-        shuffledVideos.forEach(addVideoToFeed);
-    } catch (error) {
-        console.error('Error loading videos:', error);
-        const videoContainer = document.getElementById('videoContainer');
-        videoContainer.innerHTML = '<div class="error-message">Error loading videos. Please try again later.</div>';
-    }
-}
-
-async function removeVideoFromDatabase(videoId) {
-    try {
-        const response = await fetch(`${RESTDB_URL}/${videoId}`, {
-            method: 'DELETE',
-            headers: {
-                'x-apikey': RESTDB_API_KEY,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error('Failed to delete video from database');
-        }
-
-        console.log('Removed invalid video from database:', videoId);
-    } catch (error) {
-        console.error('Error removing video from database:', error);
-        throw error;
-    }
-}
 
 function setupVideoSource(video, loadingDiv, videoData) {
     try {
@@ -767,8 +483,6 @@ function setupVideoSource(video, loadingDiv, videoData) {
         loadingDiv.innerHTML = 'Error loading video. Please try again.';
     }
 }
-
-
 
 function addVideoToFeed(videoData) {
     const videoItem = document.createElement('div');
@@ -862,55 +576,39 @@ function addVideoToFeed(videoData) {
     
     setupVideoSource(video, loadingDiv, videoData);
 }
-const reactionStyles = `
-    .reaction-buttons {
-        position: absolute;
-        right: 20px;
-        bottom: 80px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        z-index: 100;
-    }
 
-    .reaction-btn {
-        background: rgba(255, 255, 255, 0.1);
-        border: none;
-        border-radius: 50%;
-        width: 40px;
-        height: 40px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        color: white;
-    }
+async function loadVideos() {
+    try {
+        const response = await fetch(RESTDB_URL, {
+            method: 'GET',
+            headers: {
+                'x-apikey': RESTDB_API_KEY,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch videos');
+        }
+        
+        const videos = await response.json();
+        if (!Array.isArray(videos) || videos.length === 0) {
+            console.log('No videos found in database');
+            return;
+        }
 
-    .reaction-btn:hover {
-        background: rgba(255, 255, 255, 0.2);
+        const shuffledVideos = videos.sort(() => Math.random() - 0.5);
+        const videoContainer = document.getElementById('videoContainer');
+        videoContainer.innerHTML = '';
+        
+        shuffledVideos.forEach(addVideoToFeed);
+    } catch (error) {
+        console.error('Error loading videos:', error);
+        const videoContainer = document.getElementById('videoContainer');
+        videoContainer.innerHTML = '<div class="error-message">Error loading videos. Please try again later.</div>';
     }
+}
 
-    .reaction-btn.active {
-        background: rgba(255, 255, 255, 0.3);
-    }
-
-    .reaction-icon {
-        font-size: 1.2em;
-        margin-bottom: 2px;
-    }
-
-    .reaction-count {
-        font-size: 0.8em;
-        color: rgba(255, 255, 255, 0.8);
-    }
-`;
-
-// Add styles to document
-const styleSheet = document.createElement('style');
-styleSheet.textContent = reactionStyles;
-document.head.appendChild(styleSheet);
 async function handleUpload(event) {
     event.preventDefault();
     
@@ -949,23 +647,7 @@ async function handleUpload(event) {
         progress.style.width = '0%';
     }
 }
-// Add some CSS to improve iframe container styling
-const style = document.createElement('style');
-style.textContent = `
-    .video-item iframe {
-        width: 100%;
-        height: 100%;
-        border: none;
-        background: #000;
-    }
-    
-    .video-item {
-        position: relative;
-        overflow: hidden;
-        background: #000;
-    }
-`;
-document.head.appendChild(style);
+
 function openUploadModal() {
     if (!gapi.client.getToken()) {
         alert('Please sign in first');
@@ -1005,11 +687,10 @@ const observer = new IntersectionObserver((entries) => {
     });
 }, { threshold: 0.7 });
 
-// Remove the old observer code from the bottom of your file and replace with this:
+// Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
     loadVideos();
     initializeGoogleAPI();
-    
     // Add event listener for modal click-outside-to-close
     window.onclick = function(event) {
         if (event.target === document.getElementById('uploadModal')) {
