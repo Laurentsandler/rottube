@@ -602,10 +602,8 @@ const viewCountStyles = `
     }
 `;
 
-// Add styles to document
-const styleSheet = document.createElement('style');
-styleSheet.textContent = viewCountStyles;
-document.head.appendChild(styleSheet);
+
+
 async function saveToRestDB(title, description, previewUrl) {
     try {
         const response = await fetch(RESTDB_URL, {
