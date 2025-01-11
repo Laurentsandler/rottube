@@ -1,18 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'self' https://drive.google.com https://docs.google.com;">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Short Video Platform</title>
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
-    <!-- Previous CSS styles remain exactly the same -->
     <style>
-        .unmute-button:hover {
-    background: rgba(0, 0, 0, 0.7);
-}
-        /* All previous CSS styles remain exactly the same */
         * {
             margin: 0;
             padding: 0;
@@ -20,7 +14,7 @@
         }
 
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background-color: #000;
             color: #fff;
         }
@@ -37,6 +31,7 @@
             height: 100vh;
             overflow-y: scroll;
             scroll-snap-type: y mandatory;
+            position: relative;
         }
 
         .video-item {
@@ -48,63 +43,132 @@
             align-items: center;
             scroll-snap-align: start;
             position: relative;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.2), rgba(0,0,0,0.6));
         }
 
-        .video-item video {
+        .video-item video, .video-item iframe {
             width: 100%;
             height: 100%;
-            object-fit: contain;
+            object-fit: cover;
             background: #000;
         }
 
         .video-info {
             position: absolute;
-            bottom: 80px;
+            bottom: 100px;
             left: 20px;
+            right: 80px;
             color: white;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
             z-index: 100;
+            background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
+            padding: 20px;
+            border-radius: 12px;
+            backdrop-filter: blur(8px);
         }
 
         .video-title {
-            font-size: 1.2em;
+            font-size: 1.4em;
+            font-weight: 600;
             margin-bottom: 8px;
         }
 
         .video-description {
-            font-size: 0.9em;
-            max-width: 300px;
-        }
-
-        .upload-button {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background-color: #fe2c55;
-            color: white;
-            border: none;
-            border-radius: 50%;
-            width: 60px;
-            height: 60px;
-            cursor: pointer;
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
+            font-size: 1em;
+            max-width: 400px;
+            opacity: 0.9;
+            line-height: 1.4;
         }
 
         #signin-button {
             position: fixed;
             top: 20px;
             right: 20px;
-            padding: 10px 20px;
-            background-color: #fe2c55;
+            padding: 12px 24px;
+            background-color: rgba(254, 44, 85, 0.9);
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 24px;
             cursor: pointer;
             z-index: 1000;
+            font-weight: 600;
+            backdrop-filter: blur(8px);
+            transition: all 0.3s ease;
+        }
+
+        #signin-button:hover {
+            background-color: rgba(254, 44, 85, 1);
+            transform: scale(1.05);
+        }
+
+        .upload-button {
+            position: fixed;
+            bottom: 30px;
+            right: 20px;
+            background-color: rgba(254, 44, 85, 0.9);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 56px;
+            height: 56px;
+            cursor: pointer;
+            z-index: 900;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            transition: all 0.3s ease;
+        }
+
+        .upload-button:hover {
+            transform: scale(1.1);
+            background-color: rgba(254, 44, 85, 1);
+        }
+
+        .reaction-buttons {
+            position: absolute;
+            right: 20px;
+            bottom: 120px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            z-index: 800;
+        }
+
+        .reaction-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: white;
+            backdrop-filter: blur(8px);
+        }
+
+        .reaction-btn:hover {
+            transform: scale(1.1);
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .reaction-btn.active {
+            background: rgba(254, 44, 85, 0.9);
+        }
+
+        .reaction-icon {
+            font-size: 1.4em;
+            margin-bottom: 4px;
+        }
+
+        .reaction-count {
+            font-size: 0.9em;
+            font-weight: 600;
         }
 
         .upload-modal {
@@ -116,62 +180,88 @@
             height: 100%;
             background-color: rgba(0, 0, 0, 0.8);
             z-index: 2000;
+            backdrop-filter: blur(8px);
         }
 
         .modal-content {
-            background-color: white;
-            color: black;
+            background-color: #1a1a1a;
+            color: white;
             width: 90%;
             max-width: 500px;
             margin: 50px auto;
-            padding: 20px;
-            border-radius: 12px;
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
         }
 
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
 
         .form-group label {
             display: block;
-            margin-bottom: 5px;
-            color: #333;
+            margin-bottom: 8px;
+            color: #fff;
+            font-weight: 500;
         }
 
         .form-group input,
         .form-group textarea {
             width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            margin-bottom: 10px;
+            padding: 12px;
+            border: 1px solid #333;
+            border-radius: 8px;
+            background: #2a2a2a;
+            color: white;
+            font-size: 1em;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #fe2c55;
         }
 
         .submit-button {
             background-color: #fe2c55;
             color: white;
             border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
+            padding: 14px 28px;
+            border-radius: 8px;
             cursor: pointer;
             width: 100%;
+            font-weight: 600;
+            font-size: 1.1em;
+            transition: all 0.3s ease;
+        }
+
+        .submit-button:hover {
+            background-color: #ff4267;
+            transform: translateY(-2px);
         }
 
         .close-button {
             float: right;
             background: none;
             border: none;
-            font-size: 20px;
+            font-size: 24px;
             cursor: pointer;
-            color: #333;
+            color: #fff;
+            opacity: 0.8;
+            transition: opacity 0.3s ease;
+        }
+
+        .close-button:hover {
+            opacity: 1;
         }
 
         .progress-bar {
             width: 100%;
-            height: 20px;
-            background-color: #f0f0f0;
-            border-radius: 10px;
-            margin-top: 10px;
+            height: 6px;
+            background-color: #333;
+            border-radius: 3px;
+            margin-top: 16px;
+            overflow: hidden;
             display: none;
         }
 
@@ -179,25 +269,52 @@
             width: 0%;
             height: 100%;
             background-color: #fe2c55;
-            border-radius: 10px;
+            border-radius: 3px;
             transition: width 0.3s ease;
+        }
+
+        @media (max-width: 768px) {
+            .video-info {
+                bottom: 140px;
+                left: 16px;
+                right: 76px;
+                padding: 16px;
+            }
+
+            .reaction-buttons {
+                bottom: 160px;
+                right: 16px;
+            }
+
+            .upload-button {
+                bottom: 40px;
+                right: 16px;
+            }
+
+            .video-title {
+                font-size: 1.2em;
+            }
+
+            .video-description {
+                font-size: 0.9em;
+            }
         }
     </style>
 </head>
 <body>
+    <!-- Rest of the HTML remains the same -->
     <div class="app-container">
         <button id="signin-button" onclick="handleAuthClick()">Sign In</button>
         <div class="video-container" id="videoContainer">
             <!-- Videos will be loaded here -->
         </div>
-        
         <button class="upload-button" onclick="openUploadModal()">+</button>
     </div>
 
     <div class="upload-modal" id="uploadModal">
         <div class="modal-content">
             <button class="close-button" onclick="closeUploadModal()">×</button>
-            <h2 style="margin-bottom: 20px;">Upload Video</h2>
+            <h2 style="margin-bottom: 24px;">Upload Video</h2>
             <form id="uploadForm" onsubmit="handleUpload(event)">
                 <div class="form-group">
                     <label for="videoFile">Video:</label>
@@ -218,6 +335,8 @@
             </form>
         </div>
     </div>
+</body>
+
 
     <script>
 // Configuration
