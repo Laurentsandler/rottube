@@ -419,10 +419,6 @@ let nextVideoToInit = null;
 
 function setupVideoSource(video, loadingDiv, videoData) {
     try {
-        // Create iframe wrapper and elements
-        const wrapper = document.createElement('div');
-        wrapper.className = 'iframe-wrapper';
-        
         const iframe = document.createElement('iframe');
         const url = new URL(videoData.videoUrl);
         url.searchParams.set('embedded', 'true');
@@ -432,106 +428,59 @@ function setupVideoSource(video, loadingDiv, videoData) {
         iframe.height = '100%';
         iframe.frameBorder = '0';
         iframe.allowFullscreen = true;
-        iframe.allow = 'autoplay; encrypted-media';
         iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-presentation allow-forms';
 
-        // Create click overlay
-        const clickOverlay = document.createElement('div');
-        clickOverlay.className = 'click-overlay';
-        
-        // Function to simulate click on the play button
-        const simulatePlayClick = () => {
-            try {
-                // Try to click the play button inside the iframe
-                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                const playButton = iframeDoc.querySelector('.ytp-large-play-button');
-                if (playButton) {
-                    playButton.click();
-                }
-                
-                // Also try postMessage API
-                iframe.contentWindow.postMessage({
-                    'event': 'command',
-                    'func': 'playVideo',
-                    'args': []
-                }, '*');
-            } catch (e) {
-                console.log('Play simulation failed:', e);
-            }
-        };
+        // Create a flag to track if view has been counted
+        let viewCounted = false;
 
-        // Handle click on the overlay
-        clickOverlay.addEventListener('click', () => {
-            simulatePlayClick();
-            
-            // Find and prepare the next video
-            const currentVideoItem = wrapper.closest('.video-item');
-            const nextVideoItem = currentVideoItem.nextElementSibling;
-            
-            if (nextVideoItem) {
-                const nextIframe = nextVideoItem.querySelector('iframe');
-                if (nextIframe) {
-                    // Store this as the next video to initialize
-                    nextVideoToInit = nextIframe;
-                }
-            }
-        });
-
-        // Set up intersection observer
-        const videoObserver = new IntersectionObserver((entries) => {
+        // Create intersection observer for view counting
+        const viewObserver = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    // If this is the next video we stored earlier, auto-click its play button
-                    if (iframe === nextVideoToInit) {
-                        setTimeout(() => {
-                            simulatePlayClick();
-                            nextVideoToInit = null; // Reset after using
-                        }, 100);
+                if (entry.isIntersecting && !viewCounted) {
+                    // Start a timer when video becomes visible
+                    const startTime = Date.now();
+                    
+                    // Check video duration and progress periodically
+                    const checkInterval = setInterval(async () => {
+                        try {
+                            const timeWatched = (Date.now() - startTime) / 1000; // Convert to seconds
+                            
+                            // Assuming average video duration of 60 seconds for TikTok-style videos
+                            // Count view if watched more than half (30 seconds)
+                            if (timeWatched > 30 && !viewCounted) {
+                                viewCounted = true;
+                                clearInterval(checkInterval);
+                                
+                                // Increment view count in database
+                                await incrementViews(videoData._id);
+                                
+                                // Update view count in UI if displayed
+                                const viewCountElement = entry.target.querySelector('.view-count');
+                                if (viewCountElement) {
+                                    const currentViews = parseInt(viewCountElement.textContent) || 0;
+                                    viewCountElement.textContent = `${currentViews + 1} views`;
+                                }
+                            }
+                        } catch (error) {
+                            console.error('Error updating view count:', error);
+                            clearInterval(checkInterval);
+                        }
+                    }, 1000); // Check every second
+                    
+                    // Clean up interval when video is no longer visible
+                    if (!entry.isIntersecting) {
+                        clearInterval(checkInterval);
                     }
                 }
             });
-        }, { threshold: 0.7 });
+        }, { threshold: 0.5 }); // Trigger when 50% of video is visible
 
-        // Handle iframe load
-        iframe.onload = () => {
-            loadingDiv.style.display = 'none';
-            videoObserver.observe(wrapper);
-        };
-
-        // Handle errors
-        iframe.onerror = () => {
-            loadingDiv.innerHTML = 'Error loading video. Please try again.';
-            loadingDiv.style.display = 'block';
-        };
-
-        // Assemble the elements
-        wrapper.appendChild(iframe);
-        wrapper.appendChild(clickOverlay);
-        video.parentNode.replaceChild(wrapper, video);
+        // Observe the video container
+        viewObserver.observe(iframe.parentElement);
         
-        // Add styles if not already present
-        if (!document.getElementById('video-styles')) {
-            const styles = document.createElement('style');
-            styles.id = 'video-styles';
-            styles.textContent = `
-                .iframe-wrapper {
-                    position: relative;
-                    width: 100%;
-                    height: 100%;
-                    background: #000;
-                }
-                .click-overlay {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    z-index: 1;
-                    cursor: pointer;
-                }
-            `;
-            document.head.appendChild(styles);
-        }
+        // Replace video element with iframe
+        video.parentNode.replaceChild(iframe, video);
+        loadingDiv.style.display = 'none';
 
     } catch (error) {
         console.error('Error setting up video:', error);
@@ -633,6 +582,7 @@ function addVideoToFeed(videoData) {
     videoInfo.innerHTML = `
         <div class="video-title">${videoData.title}</div>
         <div class="video-description">${videoData.description}</div>
+        <div class="view-count">${videoData.views || 0} views</div>
     `;
     
     videoItem.appendChild(video);
@@ -644,7 +594,18 @@ function addVideoToFeed(videoData) {
     
     setupVideoSource(video, loadingDiv, videoData);
 }
+const viewCountStyles = `
+    .view-count {
+        font-size: 0.8em;
+        color: rgba(255, 255, 255, 0.8);
+        margin-top: 4px;
+    }
+`;
 
+// Add styles to document
+const styleSheet = document.createElement('style');
+styleSheet.textContent = viewCountStyles;
+document.head.appendChild(styleSheet);
 async function saveToRestDB(title, description, previewUrl) {
     try {
         const response = await fetch(RESTDB_URL, {
@@ -656,8 +617,9 @@ async function saveToRestDB(title, description, previewUrl) {
             body: JSON.stringify({
                 title: title,
                 description: description,
-                videoUrl: previewUrl, // Save the preview URL directly
-                timestamp: new Date().toISOString()
+                videoUrl: previewUrl,
+                timestamp: new Date().toISOString(),
+                views: 0  // Initialize views counter
             })
         });
 
@@ -668,7 +630,42 @@ async function saveToRestDB(title, description, previewUrl) {
         throw error;
     }
 }
+async function incrementViews(videoId) {
+    try {
+        // First get current video data
+        const getResponse = await fetch(`${RESTDB_URL}/${videoId}`, {
+            method: 'GET',
+            headers: {
+                'x-apikey': RESTDB_API_KEY,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!getResponse.ok) throw new Error('Failed to fetch video data');
+        const videoData = await getResponse.json();
+        
+        // Increment views
+        const updatedViews = (videoData.views || 0) + 1;
+        
+        // Update the database
+        const updateResponse = await fetch(`${RESTDB_URL}/${videoId}`, {
+            method: 'PUT',
+            headers: {
+                'x-apikey': RESTDB_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                views: updatedViews
+            })
+        });
 
+        if (!updateResponse.ok) throw new Error('Failed to update views');
+        return await updateResponse.json();
+    } catch (error) {
+        console.error('Error updating views:', error);
+        throw error;
+    }
+}
 async function loadVideos() {
     try {
         const response = await fetch(RESTDB_URL, {
