@@ -617,7 +617,10 @@ async function saveToRestDB(title, description, previewUrl) {
                 description: description,
                 videoUrl: previewUrl,
                 timestamp: new Date().toISOString(),
-                views: 0  // Initialize views counter
+                likes: 0,
+                dislikes: 0,
+                likedBy: [],    // Store user IDs who liked
+                dislikedBy: []  // Store user IDs who disliked
             })
         });
 
@@ -628,7 +631,8 @@ async function saveToRestDB(title, description, previewUrl) {
         throw error;
     }
 }
-async function incrementViews(videoId) {
+
+async function updateReaction(videoId, action, userId) {
     try {
         // First get current video data
         const getResponse = await fetch(`${RESTDB_URL}/${videoId}`, {
@@ -642,8 +646,16 @@ async function incrementViews(videoId) {
         if (!getResponse.ok) throw new Error('Failed to fetch video data');
         const videoData = await getResponse.json();
         
-        // Increment views
-        const updatedViews = (videoData.views || 0) + 1;
+        // Remove user from both arrays first (in case they're switching their vote)
+        const likedBy = videoData.likedBy?.filter(id => id !== userId) || [];
+        const dislikedBy = videoData.dislikedBy?.filter(id => id !== userId) || [];
+        
+        // Update appropriate array based on action
+        if (action === 'like') {
+            likedBy.push(userId);
+        } else if (action === 'dislike') {
+            dislikedBy.push(userId);
+        }
         
         // Update the database
         const updateResponse = await fetch(`${RESTDB_URL}/${videoId}`, {
@@ -653,14 +665,17 @@ async function incrementViews(videoId) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                views: updatedViews
+                likes: likedBy.length,
+                dislikes: dislikedBy.length,
+                likedBy: likedBy,
+                dislikedBy: dislikedBy
             })
         });
 
-        if (!updateResponse.ok) throw new Error('Failed to update views');
+        if (!updateResponse.ok) throw new Error('Failed to update reaction');
         return await updateResponse.json();
     } catch (error) {
-        console.error('Error updating views:', error);
+        console.error('Error updating reaction:', error);
         throw error;
     }
 }
@@ -759,7 +774,6 @@ function addVideoToFeed(videoData) {
     const videoItem = document.createElement('div');
     videoItem.className = 'video-item';
     
-    // Create a temporary video element (will be replaced with iframe)
     const video = document.createElement('video');
     
     const loadingDiv = document.createElement('div');
@@ -776,6 +790,61 @@ function addVideoToFeed(videoData) {
         border-radius: 4px;
     `;
 
+    // Create reaction buttons container
+    const reactionButtons = document.createElement('div');
+    reactionButtons.className = 'reaction-buttons';
+    
+    // Get user ID from Google auth
+    const userId = gapi.client.getToken()?.sub || 'anonymous';
+    
+    // Check if user has already reacted
+    const hasLiked = videoData.likedBy?.includes(userId);
+    const hasDisliked = videoData.dislikedBy?.includes(userId);
+
+    reactionButtons.innerHTML = `
+        <button class="reaction-btn like-btn ${hasLiked ? 'active' : ''}" data-action="like">
+            <span class="reaction-icon">👍</span>
+            <span class="reaction-count">${videoData.likes || 0}</span>
+        </button>
+        <button class="reaction-btn dislike-btn ${hasDisliked ? 'active' : ''}" data-action="dislike">
+            <span class="reaction-icon">👎</span>
+            <span class="reaction-count">${videoData.dislikes || 0}</span>
+        </button>
+    `;
+
+    // Add event listeners to reaction buttons
+    reactionButtons.querySelectorAll('.reaction-btn').forEach(button => {
+        button.addEventListener('click', async (e) => {
+            if (!gapi.client.getToken()) {
+                alert('Please sign in to react to videos');
+                return;
+            }
+
+            const action = button.dataset.action;
+            const videoId = videoData._id;
+            const userId = gapi.client.getToken().sub;
+
+            try {
+                const updatedVideo = await updateReaction(videoId, action, userId);
+                
+                // Update UI
+                const likeBtn = reactionButtons.querySelector('.like-btn');
+                const dislikeBtn = reactionButtons.querySelector('.dislike-btn');
+                
+                likeBtn.querySelector('.reaction-count').textContent = updatedVideo.likes;
+                dislikeBtn.querySelector('.reaction-count').textContent = updatedVideo.dislikes;
+                
+                // Update active states
+                likeBtn.classList.toggle('active', updatedVideo.likedBy.includes(userId));
+                dislikeBtn.classList.toggle('active', updatedVideo.dislikedBy.includes(userId));
+                
+            } catch (error) {
+                console.error('Error updating reaction:', error);
+                alert('Failed to update reaction. Please try again.');
+            }
+        });
+    });
+
     const videoInfo = document.createElement('div');
     videoInfo.className = 'video-info';
     videoInfo.innerHTML = `
@@ -786,13 +855,62 @@ function addVideoToFeed(videoData) {
     videoItem.appendChild(video);
     videoItem.appendChild(loadingDiv);
     videoItem.appendChild(videoInfo);
+    videoItem.appendChild(reactionButtons);
     
     const videoContainer = document.getElementById('videoContainer');
     videoContainer.appendChild(videoItem);
     
     setupVideoSource(video, loadingDiv, videoData);
 }
+const reactionStyles = `
+    .reaction-buttons {
+        position: absolute;
+        right: 20px;
+        bottom: 80px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        z-index: 100;
+    }
 
+    .reaction-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        color: white;
+    }
+
+    .reaction-btn:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+
+    .reaction-btn.active {
+        background: rgba(255, 255, 255, 0.3);
+    }
+
+    .reaction-icon {
+        font-size: 1.2em;
+        margin-bottom: 2px;
+    }
+
+    .reaction-count {
+        font-size: 0.8em;
+        color: rgba(255, 255, 255, 0.8);
+    }
+`;
+
+// Add styles to document
+const styleSheet = document.createElement('style');
+styleSheet.textContent = reactionStyles;
+document.head.appendChild(styleSheet);
 async function handleUpload(event) {
     event.preventDefault();
     
