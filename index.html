@@ -287,7 +287,22 @@
                 bottom: 160px;
                 right: 16px;
             }
+.submit-button:disabled {
+    background-color: #666;
+    cursor: not-allowed;
+    transform: none;
+}
 
+.success-message {
+    background-color: rgba(0, 255, 0, 0.8);
+    color: white;
+    padding: 1rem;
+    border-radius: 4px;
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+}
             .upload-button {
                 bottom: 40px;
                 right: 16px;
@@ -368,7 +383,8 @@ const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 let tokenClient;
 let gapiInited = false;
 let gisInited = false;
-
+let isUploading = false;
+        
 // Lazy loading observer
 const videoObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -563,26 +579,34 @@ function createVideoElement(videoData) {
 async function handleUpload(event) {
     event.preventDefault();
     
+    // Prevent multiple uploads
+    if (isUploading) {
+        return;
+    }
+    
     if (!gapi.client.getToken()) {
         showError('Please sign in first');
         return;
     }
     
-    // Get form elements directly
+    const submitButton = event.target.querySelector('.submit-button');
     const videoFile = document.getElementById('videoFile').files[0];
     const title = document.getElementById('title').value;
     const description = document.getElementById('description').value;
     
-    // Validate file exists
     if (!videoFile) {
         showError('Please select a video file');
         return;
     }
     
-    showProgress();
-    
     try {
-        // Log file details for debugging
+        // Set uploading flag and disable button
+        isUploading = true;
+        submitButton.disabled = true;
+        submitButton.textContent = 'Uploading...';
+        
+        showProgress();
+        
         console.log('Uploading file:', {
             name: videoFile.name,
             type: videoFile.type,
@@ -597,13 +621,20 @@ async function handleUpload(event) {
         
         await loadVideos();
         closeUploadModal();
+        showError('Video uploaded successfully!');
+        
     } catch (error) {
         console.error('Upload failed:', error);
         showError('Failed to upload video: ' + error.message);
     } finally {
+        // Reset uploading flag and button state
+        isUploading = false;
+        submitButton.disabled = false;
+        submitButton.textContent = 'Upload';
         hideProgress();
     }
 }
+
 
 // Utility functions
 function showError(message) {
@@ -663,6 +694,14 @@ function closeUploadModal() {
     uploadModal.style.display = 'none';
     document.getElementById('uploadForm').reset();
     hideProgress();
+    
+    // Reset upload state
+    isUploading = false;
+    const submitButton = document.querySelector('.submit-button');
+    if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Upload';
+    }
 }
         // API Integration Functions
 async function uploadToDrive(file, title, description) {
@@ -724,7 +763,24 @@ async function uploadToDrive(file, title, description) {
         throw new Error(error.message || 'Failed to upload to Drive');
     }
 }
-
+function showSuccess(message) {
+    const successDiv = document.createElement('div');
+    successDiv.className = 'success-message';
+    successDiv.textContent = message;
+    successDiv.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: rgba(0,255,0,0.8);
+        padding: 1rem;
+        border-radius: 4px;
+        z-index: 9999;
+        color: white;
+    `;
+    
+    document.body.appendChild(successDiv);
+    setTimeout(() => successDiv.remove(), 3000);
+}
 async function saveToRestDB(title, description, previewUrl) {
     try {
         const response = await fetch(RESTDB_URL, {
