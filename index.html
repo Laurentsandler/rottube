@@ -421,7 +421,38 @@ function addEventListeners() {
     // Form submission
     document.getElementById('uploadForm').addEventListener('submit', handleUpload);
 }
+function handleAuthClick() {
+    if (!tokenClient) {
+        console.error('Token client not initialized');
+        return;
+    }
 
+    return new Promise((resolve, reject) => {
+        try {
+            tokenClient.callback = async (resp) => {
+                if (resp.error !== undefined) {
+                    reject(resp);
+                    return;
+                }
+                
+                const button = document.getElementById('signin-button');
+                button.innerText = 'Signed In';
+                button.disabled = true;
+                
+                await loadVideos();
+                resolve(resp);
+            };
+
+            if (gapi.client.getToken() === null) {
+                tokenClient.requestAccessToken({ prompt: 'consent' });
+            } else {
+                tokenClient.requestAccessToken({ prompt: '' });
+            }
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
 function initializeGoogleAPI() {
     gapi.load('client', async () => {
         try {
