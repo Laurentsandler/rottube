@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="preconnect" href="https://apis.google.com">
+     <link rel="preconnect" href="https://accounts.google.com">
+      <link rel="preconnect" href="https://www.googleapis.com">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Short Video Platform</title>
-    <script src="https://apis.google.com/js/api.js"></script>
-    <script src="https://accounts.google.com/gsi/client"></script>
+   
     <style>
         * {
             margin: 0;
@@ -299,6 +301,15 @@
                 font-size: 0.9em;
             }
         }
+        .cookie-banner {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    background: rgba(0,0,0,0.9);
+    padding: 1rem;
+    z-index: 9999;
+    display: none;
+}
     </style>
 </head>
 <body>
@@ -310,7 +321,11 @@
         </div>
         <button class="upload-button" onclick="openUploadModal()">+</button>
     </div>
-
+<div id="cookie-consent" class="cookie-banner">
+    <p>This site uses cookies for authentication and preferences. 
+       By continuing to use this site, you agree to their use.</p>
+    <button onclick="acceptCookies()">Accept</button>
+</div>
     <div class="upload-modal" id="uploadModal">
         <div class="modal-content">
             <button class="close-button" onclick="closeUploadModal()">×</button>
@@ -335,6 +350,8 @@
             </form>
         </div>
     </div>
+     <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
 </body>
 
 
@@ -462,7 +479,16 @@ function initializeGoogleAPI() {
         }
     });
 }
+function acceptCookies() {
+    localStorage.setItem('cookieConsent', 'true');
+    document.getElementById('cookie-consent').style.display = 'none';
+}
 
+function checkCookieConsent() {
+    if (!localStorage.getItem('cookieConsent')) {
+        document.getElementById('cookie-consent').style.display = 'block';
+    }
+}
 function handleAuthClick() {
     if (!tokenClient) {
         console.error('Token client not initialized');
