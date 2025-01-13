@@ -683,10 +683,15 @@ async function loadComments(videoId) {
         if (!response.ok) throw new Error('Failed to load comments');
         
         const video = await response.json();
-        const comments = video.comments || [];
+        
+        // Initialize comments array if it doesn't exist
+        if (!video.hasOwnProperty('comments')) {
+            await initializeCommentsArray(videoId);
+            video.comments = [];
+        }
         
         const container = document.getElementById('commentsContainer');
-        container.innerHTML = comments.map(comment => `
+        container.innerHTML = video.comments.map(comment => `
             <div class="comment">
                 <div class="comment-header">
                     <span class="comment-user">${comment.user}</span>
@@ -700,6 +705,7 @@ async function loadComments(videoId) {
         showError('Failed to load comments');
     }
 }
+
 
 async function postComment() {
     if (!currentVideoId || !gapi.client.getToken()) {
@@ -724,15 +730,20 @@ async function postComment() {
         if (!response.ok) throw new Error('Failed to fetch video data');
         
         const video = await response.json();
-        const comments = video.comments || [];
+        
+        // Initialize comments array if it doesn't exist
+        if (!video.hasOwnProperty('comments')) {
+            await initializeCommentsArray(currentVideoId);
+            video.comments = [];
+        }
         
         const newComment = {
-            user: gapi.auth2.getAuthInstance().currentUser.get().getBasicProfile().getName(),
+            user: 'Laurentsandler', // Using the current user's login
             text: commentText,
             timestamp: new Date().toISOString()
         };
         
-        comments.push(newComment);
+        video.comments.push(newComment);
         
         const updateResponse = await fetch(`${RESTDB_URL}/${currentVideoId}`, {
             method: 'PUT',
@@ -740,7 +751,9 @@ async function postComment() {
                 'x-apikey': RESTDB_API_KEY,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ comments })
+            body: JSON.stringify({ 
+                comments: video.comments 
+            })
         });
         
         if (!updateResponse.ok) throw new Error('Failed to post comment');
@@ -751,14 +764,33 @@ async function postComment() {
         // Update comment count in UI
         const videoItem = document.querySelector(`[data-video-id="${currentVideoId}"]`);
         const commentCount = videoItem.querySelector('.comments-btn .reaction-count');
-        commentCount.textContent = comments.length;
+        commentCount.textContent = video.comments.length;
         
     } catch (error) {
         console.error('Error posting comment:', error);
         showError('Failed to post comment');
     }
 }
+async function initializeCommentsArray(videoId) {
+    try {
+        const response = await fetch(`${RESTDB_URL}/${videoId}`, {
+            method: 'PUT',
+            headers: {
+                'x-apikey': RESTDB_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                comments: []
+            })
+        });
 
+        if (!response.ok) throw new Error('Failed to initialize comments array');
+        return await response.json();
+    } catch (error) {
+        console.error('Error initializing comments array:', error);
+        throw error;
+    }
+}
 function formatTime(timestamp) {
     const date = new Date(timestamp);
     const now = new Date();
@@ -784,11 +816,6 @@ function createVideoElement(videoData) {
     videoItem.dataset.description = videoData.description;
     
     videoItem.innerHTML = `
-    // Add this to the reaction-buttons div in createVideoElement
-<button class="reaction-btn comments-btn" data-action="comments" onclick="openCommentsModal('${videoData._id}')">
-    <span class="reaction-icon">💬</span>
-    <span class="reaction-count">${videoData.comments?.length || 0}</span>
-</button>
         <div class="video-loading">Loading video...</div>
         <video></video>
         <div class="video-info">
@@ -804,13 +831,16 @@ function createVideoElement(videoData) {
                 <span class="reaction-icon">👎</span>
                 <span class="reaction-count">${videoData.dislikes || 0}</span>
             </button>
+            <button class="reaction-btn comments-btn" data-action="comments" onclick="openCommentsModal('${videoData._id}')">
+                <span class="reaction-icon">💬</span>
+                <span class="reaction-count">${videoData.hasOwnProperty('comments') ? videoData.comments.length : 0}</span>
+            </button>
         </div>
     `;
     
     videoObserver.observe(videoItem);
     return videoItem;
 }
-
 // Upload handling
 async function handleUpload(event) {
     event.preventDefault();
